@@ -8,7 +8,12 @@
       "Bash(grep:*)",
       "Bash(lsof:*)",
       "Bash(ps:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(node -e:*)",
+      "Bash(timeout:*)",
+      "Bash(xargs:*)",
+      "Bash(git checkout:*)",
+      "Bash(git status:*)"
     ]
   }
 }

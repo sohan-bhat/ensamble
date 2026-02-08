@@ -75,6 +75,25 @@ function restPosition(clef) {
 }
 
 // ---------------------------------------------------------------------------
+// Get effective key/time signature for a measure, walking back to find
+// the most recent override or falling back to the score default.
+// ---------------------------------------------------------------------------
+function getEffectiveSignature(measure, scoreData) {
+  const sigs = scoreData.measureSignatures || [];
+  let key = scoreData.score.key_signature;
+  let time = scoreData.score.time_signature;
+  let tempo = scoreData.score.tempo;
+  for (const s of sigs) {
+    if (s.measure <= measure) {
+      if (s.key_signature) key = s.key_signature;
+      if (s.time_signature) time = s.time_signature;
+      if (s.tempo) tempo = s.tempo;
+    }
+  }
+  return { key, time, tempo };
+}
+
+// ---------------------------------------------------------------------------
 // Fill a measure with VexFlow StaveNotes (notes + auto-rests)
 // ---------------------------------------------------------------------------
 function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
@@ -142,11 +161,16 @@ export class ScoreRenderer {
     this.container = document.getElementById(containerId);
     this.labelsContainer = document.getElementById('instrument-labels');
     this.staveMap = []; // store stave positions for click detection
-    this.measuresPerSystem = 4;
-    this.staveSpacing = 75;
-    this.systemGap = 35;
-    this.leftMargin = 40;
-    this.firstStaveExtra = 80; // extra width for clef + key sig on first stave of system
+  }
+
+  _getResponsiveSettings() {
+    const w = window.innerWidth;
+    if (w <= 480) {
+      return { measuresPerSystem: 1, staveSpacing: 65, systemGap: 25, leftMargin: 40 };
+    } else if (w <= 768) {
+      return { measuresPerSystem: 2, staveSpacing: 70, systemGap: 30, leftMargin: 40 };
+    }
+    return { measuresPerSystem: 4, staveSpacing: 75, systemGap: 35, leftMargin: 40 };
   }
 
   /**
@@ -158,11 +182,16 @@ export class ScoreRenderer {
     const { score, instruments, notes } = data;
     this.container.innerHTML = '';
     this.staveMap = [];
+    this._tempoMarks = [];
 
-    const keyAccidentals = getKeyAccidentals(score.key_signature);
-    const [beatsNum] = score.time_signature.split('/').map(Number);
+    const rs = this._getResponsiveSettings();
+    const measuresPerSystem = rs.measuresPerSystem;
+    const staveSpacing = rs.staveSpacing;
+    const systemGap = rs.systemGap;
+    const leftMargin = rs.leftMargin;
+
     const totalMeasures = score.total_measures;
-    const numSystems = Math.ceil(totalMeasures / this.measuresPerSystem);
+    const numSystems = Math.ceil(totalMeasures / measuresPerSystem);
 
     // Group notes by instrument_id + measure
     const noteMap = {};
@@ -171,10 +200,10 @@ export class ScoreRenderer {
       (noteMap[k] = noteMap[k] || []).push(n);
     }
 
-    // Calculate dimensions
-    const containerWidth = Math.max(this.container.clientWidth, 800);
-    const systemHeight = instruments.length * this.staveSpacing;
-    const totalHeight = numSystems * (systemHeight + this.systemGap) + 60;
+    // Calculate dimensions — no minimum width, fit the viewport
+    const containerWidth = Math.max(this.container.clientWidth, 320);
+    const systemHeight = instruments.length * staveSpacing;
+    const totalHeight = numSystems * (systemHeight + systemGap) + 60;
 
     const renderer = new VF.Renderer(this.container, VF.Renderer.Backends.SVG);
     renderer.resize(containerWidth, totalHeight);
@@ -182,44 +211,59 @@ export class ScoreRenderer {
     ctx.scale(1, 1);
 
     for (let sys = 0; sys < numSystems; sys++) {
-      const startMeasure = sys * this.measuresPerSystem + 1;
-      const systemY = sys * (systemHeight + this.systemGap) + 20;
+      const startMeasure = sys * measuresPerSystem + 1;
+      const systemY = sys * (systemHeight + systemGap) + 20;
 
       // How many measures in this system (last system may be shorter)
-      const measCount = Math.min(this.measuresPerSystem, totalMeasures - startMeasure + 1);
+      const measCount = Math.min(measuresPerSystem, totalMeasures - startMeasure + 1);
 
-      // Stave widths: first stave in system is wider (clef + key sig)
-      const availableWidth = containerWidth - this.leftMargin - 20;
-      const firstW = (availableWidth / measCount) + (this.firstStaveExtra / measCount);
-      const normalW = (availableWidth - this.firstStaveExtra) / measCount;
-      // Actually, let's keep it simpler: fixed width
+      const availableWidth = containerWidth - leftMargin - 10;
       const staveWidth = (availableWidth) / measCount;
 
       let firstStavesOfSystem = []; // for bracket
 
       for (let i = 0; i < instruments.length; i++) {
         const inst = instruments[i];
-        const y = systemY + i * this.staveSpacing;
+        const y = systemY + i * staveSpacing;
         const stavesInRow = [];
 
         for (let m = 0; m < measCount; m++) {
           const measureNum = startMeasure + m;
           const isFirst = m === 0;
           const isFirstSystem = sys === 0;
-          const x = this.leftMargin + m * staveWidth;
+          const x = leftMargin + m * staveWidth;
+
+          // Get effective signature for this measure
+          const eSig = getEffectiveSignature(measureNum, data);
+          const prevSig = measureNum > 1 ? getEffectiveSignature(measureNum - 1, data) : null;
+          const keyChanged = prevSig && prevSig.key !== eSig.key;
+          const timeChanged = prevSig && prevSig.time !== eSig.time;
+          const tempoChanged = prevSig && prevSig.tempo !== eSig.tempo;
 
           const stave = new VF.Stave(x, y, staveWidth);
 
           if (isFirst) {
             stave.addClef(inst.clef);
-            stave.addKeySignature(score.key_signature);
+            stave.addKeySignature(eSig.key);
             if (isFirstSystem) {
-              stave.addTimeSignature(score.time_signature);
+              stave.addTimeSignature(eSig.time);
             }
+          }
+
+          // Show key/time signature changes mid-piece
+          if (!isFirst) {
+            if (keyChanged) stave.addKeySignature(eSig.key);
+            if (timeChanged) stave.addTimeSignature(eSig.time);
           }
 
           stave.setContext(ctx).draw();
           stavesInRow.push(stave);
+
+          // Draw tempo marking above top stave when tempo changes (or first measure)
+          if (i === 0 && (measureNum === 1 || tempoChanged)) {
+            this._tempoMarks = this._tempoMarks || [];
+            this._tempoMarks.push({ x: x + 5, y: y - 5, tempo: eSig.tempo });
+          }
 
           // Store for click detection
           this.staveMap.push({
@@ -228,25 +272,28 @@ export class ScoreRenderer {
             clef: inst.clef,
             measure: measureNum,
             x, y, width: staveWidth,
-            height: this.staveSpacing,
+            height: staveSpacing,
             stave,
           });
 
-          // Render notes
+          // Render notes with effective key accidentals and beats
+          const mKeyAcc = getKeyAccidentals(eSig.key);
+          const [mBeatsNum] = eSig.time.split('/').map(Number);
           const mNotes = noteMap[`${inst.id}__${measureNum}`] || [];
-          const vexNotes = buildMeasureNotes(mNotes, inst.clef, keyAccidentals, beatsNum);
+          const vexNotes = buildMeasureNotes(mNotes, inst.clef, mKeyAcc, mBeatsNum);
 
           if (vexNotes.length > 0) {
             const voice = new VF.Voice({
-              num_beats: beatsNum,
-              beat_value: parseInt(score.time_signature.split('/')[1]),
+              num_beats: mBeatsNum,
+              beat_value: parseInt(eSig.time.split('/')[1]),
             });
             voice.setMode(VF.Voice.Mode.SOFT);
             voice.addTickables(vexNotes);
 
+            const fmtWidth = Math.max(stave.getNoteEndX() - stave.getNoteStartX() - 10, 50);
             new VF.Formatter()
               .joinVoices([voice])
-              .format([voice], staveWidth - (isFirst ? 100 : 30));
+              .format([voice], fmtWidth);
 
             voice.draw(ctx, stave);
 
@@ -283,10 +330,54 @@ export class ScoreRenderer {
       }
     }
 
+    // Add hover highlight rects for each measure column
+    this._addMeasureHoverRects(ctx, instruments, totalMeasures);
+
+    // Draw tempo markings above staves
+    this._drawTempoMarks();
+
     // Render instrument labels for the first system
     this._renderLabels(instruments);
 
     return this.staveMap;
+  }
+
+  _drawTempoMarks() {
+    if (!this._tempoMarks || this._tempoMarks.length === 0) return;
+    const svgEl = this.container.querySelector('svg');
+    if (!svgEl) return;
+
+    for (const mark of this._tempoMarks) {
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', mark.x);
+      text.setAttribute('y', mark.y);
+      text.setAttribute('font-family', '"DM Sans", sans-serif');
+      text.setAttribute('font-size', '11');
+      text.setAttribute('font-weight', '600');
+      text.setAttribute('fill', '#2C2C2C');
+      text.setAttribute('pointer-events', 'none');
+      text.textContent = `\u2669 = ${mark.tempo}`;
+      svgEl.appendChild(text);
+    }
+    this._tempoMarks = [];
+  }
+
+  _addMeasureHoverRects(ctx, instruments, totalMeasures) {
+    const svgEl = this.container.querySelector('svg');
+    if (!svgEl) return;
+
+    // One hover rect per individual stave (instrument × measure)
+    for (const s of this.staveMap) {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', s.x);
+      rect.setAttribute('y', s.y);
+      rect.setAttribute('width', s.width);
+      rect.setAttribute('height', s.height);
+      rect.setAttribute('class', 'measure-hover-rect');
+      rect.setAttribute('data-measure', s.measure);
+      rect.setAttribute('data-instrument', s.instrumentId);
+      svgEl.appendChild(rect);
+    }
   }
 
   _renderLabels(instruments) {
@@ -349,4 +440,5 @@ export {
   DUR_TO_VEX, DUR_TO_BEATS, REST_DURATIONS,
   getKeyAccidentals, pitchToVexKey, pitchAccidental, pitchLetter,
   displayAccidental, restPosition, buildMeasureNotes, pushRests,
+  getEffectiveSignature,
 };

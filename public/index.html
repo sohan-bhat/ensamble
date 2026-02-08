@@ -15,15 +15,11 @@
   <header class="site-header">
     <h1 class="logo">Ensemble</h1>
     <p class="tagline">A shared score for the world</p>
-    <div class="mode-toggle">
-      <button id="mode-beginner" class="mode-btn active">Beginner</button>
-      <button id="mode-advanced" class="mode-btn">Advanced</button>
-    </div>
   </header>
 
   <!-- Score metadata -->
   <div class="score-meta">
-    <h2 class="piece-title">Untitled No. 1</h2>
+    <h2 class="piece-title">Global Symphonia No. 1</h2>
     <div class="meta-details">
       <span class="key-sig">D Major</span>
       <span class="meta-dot">&middot;</span>
@@ -62,13 +58,14 @@
     </div>
   </div>
 
-  <!-- Beginner instrument selector (shown only in beginner mode) -->
-  <div id="beginner-instrument-bar" class="beginner-instrument-bar" style="display:none">
-    <button class="beginner-inst-btn active" data-inst="violin1">Violin I</button>
-    <button class="beginner-inst-btn" data-inst="violin2">Violin II</button>
-    <button class="beginner-inst-btn" data-inst="viola">Viola</button>
-    <button class="beginner-inst-btn" data-inst="cello">Cello</button>
-    <button class="beginner-inst-btn" data-inst="contrabass">Bass</button>
+  <!-- Keyboard shortcut hint -->
+  <div class="shortcut-hint">
+    <span>Space</span> Play &nbsp;
+    <span>E</span> Edit &nbsp;
+    <span>Esc</span> Close &nbsp;
+    <span>1-5</span> Duration &nbsp;
+    <span>R</span> Rest &nbsp;
+    <span>V</span> Vibrato
   </div>
 
   <!-- Score container -->
@@ -95,15 +92,46 @@
       <div class="editor-toolbar">
         <div class="toolbar-group">
           <span class="toolbar-label">Duration</span>
-          <button class="dur-btn" data-duration="whole" title="Whole note (1)"><svg width="16" height="16" viewBox="0 0 16 16"><ellipse cx="8" cy="8" rx="6" ry="4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-          <button class="dur-btn" data-duration="half" title="Half note (2)"><svg width="16" height="18" viewBox="0 0 16 18"><ellipse cx="7" cy="12" rx="5" ry="3.5" fill="none" stroke="currentColor" stroke-width="1.5" transform="rotate(-15 7 12)"/><line x1="12" y1="12" x2="12" y2="1" stroke="currentColor" stroke-width="1.5"/></svg></button>
-          <button class="dur-btn active" data-duration="quarter" title="Quarter note (3)"><svg width="16" height="18" viewBox="0 0 16 18"><ellipse cx="7" cy="12" rx="5" ry="3.5" fill="currentColor" transform="rotate(-15 7 12)"/><line x1="12" y1="12" x2="12" y2="1" stroke="currentColor" stroke-width="1.5"/></svg></button>
-          <button class="dur-btn" data-duration="eighth" title="Eighth note (4)"><svg width="16" height="18" viewBox="0 0 16 18"><ellipse cx="7" cy="12" rx="5" ry="3.5" fill="currentColor" transform="rotate(-15 7 12)"/><line x1="12" y1="12" x2="12" y2="1" stroke="currentColor" stroke-width="1.5"/><path d="M12 1 Q15 4 13 7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-          <button class="dur-btn" data-duration="sixteenth" title="Sixteenth note (5)"><svg width="16" height="18" viewBox="0 0 16 18"><ellipse cx="7" cy="12" rx="5" ry="3.5" fill="currentColor" transform="rotate(-15 7 12)"/><line x1="12" y1="12" x2="12" y2="1" stroke="currentColor" stroke-width="1.5"/><path d="M12 1 Q15 4 13 7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 4 Q15 7 13 10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+          <button class="dur-btn" data-duration="whole" title="Whole note (1)">
+            <svg width="20" height="20" viewBox="0 0 20 20">
+              <ellipse cx="10" cy="10" rx="7" ry="4.5" fill="none" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="dur-btn" data-duration="half" title="Half note (2)">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <ellipse cx="8" cy="16" rx="6" ry="4" fill="none" stroke="currentColor" stroke-width="2" transform="rotate(-20 8 16)"/>
+              <line x1="13.5" y1="14" x2="13.5" y2="2" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="dur-btn active" data-duration="quarter" title="Quarter note (3)">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <ellipse cx="8" cy="16" rx="6" ry="4" fill="currentColor" transform="rotate(-20 8 16)"/>
+              <line x1="13.5" y1="14" x2="13.5" y2="2" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="dur-btn" data-duration="eighth" title="Eighth note (4)">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <ellipse cx="8" cy="16" rx="6" ry="4" fill="currentColor" transform="rotate(-20 8 16)"/>
+              <line x1="13.5" y1="14" x2="13.5" y2="2" stroke="currentColor" stroke-width="2"/>
+              <path d="M13.5 2 C16 3.5 18 6 16 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="dur-btn" data-duration="sixteenth" title="Sixteenth note (5)">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <ellipse cx="8" cy="16" rx="6" ry="4" fill="currentColor" transform="rotate(-20 8 16)"/>
+              <line x1="13.5" y1="14" x2="13.5" y2="2" stroke="currentColor" stroke-width="2"/>
+              <path d="M13.5 2 C16 3.5 18 6 16 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M13.5 6 C16 7.5 18 10 16 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
         </div>
         <div class="toolbar-group">
           <span class="toolbar-label">Mode</span>
           <button id="rest-toggle" class="tool-btn" title="Rest mode (R)">Rest</button>
+        </div>
+        <div class="toolbar-group">
+          <span class="toolbar-label">Expr.</span>
+          <button id="vibrato-toggle" class="tool-btn" title="Vibrato (V)">Vibrato</button>
         </div>
         <div class="toolbar-group">
           <span class="toolbar-label">Accidental</span>
@@ -123,6 +151,40 @@
           </select>
         </div>
         <div class="toolbar-group">
+          <span class="toolbar-label">Key</span>
+          <select id="key-sig-select">
+            <option value="C">C</option>
+            <option value="G">G</option>
+            <option value="D">D</option>
+            <option value="A">A</option>
+            <option value="E">E</option>
+            <option value="B">B</option>
+            <option value="F#">F♯</option>
+            <option value="F">F</option>
+            <option value="Bb">B♭</option>
+            <option value="Eb">E♭</option>
+            <option value="Ab">A♭</option>
+            <option value="Db">D♭</option>
+            <option value="Gb">G♭</option>
+          </select>
+        </div>
+        <div class="toolbar-group">
+          <span class="toolbar-label">Time</span>
+          <select id="time-sig-select">
+            <option value="2/4">2/4</option>
+            <option value="3/4">3/4</option>
+            <option value="4/4">4/4</option>
+            <option value="5/4">5/4</option>
+            <option value="6/4">6/4</option>
+            <option value="6/8">6/8</option>
+            <option value="3/8">3/8</option>
+          </select>
+        </div>
+        <div class="toolbar-group">
+          <span class="toolbar-label">BPM</span>
+          <input id="tempo-input" type="number" min="20" max="300" value="100" title="Tempo (BPM) for this measure">
+        </div>
+        <div class="toolbar-group">
           <button id="undo-btn" class="tool-btn" title="Undo (Ctrl+Z)">Undo</button>
         </div>
       </div>
@@ -130,35 +192,7 @@
         <div id="editor-score"></div>
         <canvas id="ghost-canvas"></canvas>
       </div>
-      <div class="editor-hint">Hover to preview note position. Click to place. Keys: 1-5 duration, R rest, Ctrl+Z undo.</div>
-    </div>
-  </div>
-
-  <!-- Keyboard shortcut hint (advanced mode) -->
-  <div class="shortcut-hint" id="shortcut-hint-advanced">
-    <span>Space</span> Play &nbsp;
-    <span>E</span> Edit &nbsp;
-    <span>Esc</span> Close &nbsp;
-    <span>1-5</span> Duration &nbsp;
-    <span>R</span> Rest
-  </div>
-
-  <!-- Beginner mode hint -->
-  <div class="shortcut-hint" id="shortcut-hint-beginner" style="display:none">
-    Click on a measure to add notes &middot; Drag note edges to resize &middot; <span>Space</span> Play
-  </div>
-
-  <!-- Tutorial overlay -->
-  <div id="tutorial-overlay" class="tutorial-overlay hidden">
-    <div class="tutorial-backdrop"></div>
-    <div class="tutorial-card">
-      <div class="tutorial-step-counter"></div>
-      <h3 class="tutorial-title"></h3>
-      <p class="tutorial-text"></p>
-      <div class="tutorial-buttons">
-        <button id="tutorial-skip" class="tutorial-btn-skip">Skip</button>
-        <button id="tutorial-next" class="tutorial-btn-next">Next</button>
-      </div>
+      <div class="editor-hint">Hover to preview note position. Click to place. Keys: 1-5 duration, R rest, V vibrato, Ctrl+Z undo.</div>
     </div>
   </div>
 
@@ -167,8 +201,6 @@
   <script type="module" src="/js/renderer.js"></script>
   <script type="module" src="/js/editor.js"></script>
   <script type="module" src="/js/playback.js"></script>
-  <script type="module" src="/js/beginner-renderer.js"></script>
-  <script type="module" src="/js/tutorial.js"></script>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

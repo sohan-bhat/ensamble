@@ -193,6 +193,18 @@ body {
   display: block;
 }
 
+/* Measure hover highlight in main score */
+.measure-hover-rect {
+  fill: transparent;
+  stroke: none;
+  cursor: pointer;
+  transition: fill 0.1s;
+}
+
+.measure-hover-rect:hover {
+  fill: rgba(44, 44, 44, 0.04);
+}
+
 /* Playhead highlight for current measure during playback */
 .measure-highlight {
   fill: var(--accent);
@@ -389,9 +401,17 @@ body {
 }
 
 .dur-btn {
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 0.2rem 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.3rem;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.dur-btn svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .dur-btn:hover,
@@ -409,16 +429,35 @@ body {
   border-color: var(--accent);
 }
 
-#dynamic-select {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-size: 0.95rem;
+#dynamic-select,
+#key-sig-select,
+#time-sig-select {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
   padding: 0.2rem 0.4rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: white;
   color: var(--ink);
   cursor: pointer;
+}
+
+#dynamic-select {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 0.95rem;
+}
+
+#tempo-input {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: white;
+  color: var(--ink);
+  width: 56px;
+  text-align: center;
 }
 
 /* Editor score area */
@@ -431,6 +470,7 @@ body {
   overflow: hidden;
   min-height: 120px;
   cursor: crosshair;
+  touch-action: none; /* prevent browser gestures in editor */
 }
 
 #editor-score {
@@ -495,188 +535,239 @@ body {
   border-radius: 3px;
 }
 
-/* ---- Mode Toggle ---- */
-
-.mode-toggle {
-  display: inline-flex;
-  margin-top: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  background: white;
-}
-
-.mode-btn {
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  font-weight: 500;
-  padding: 0.35rem 1rem;
-  border: none;
-  background: white;
-  color: var(--ink-faint);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.mode-btn:not(:last-child) {
-  border-right: 1px solid var(--border);
-}
-
-.mode-btn:hover {
-  color: var(--ink);
-}
-
-.mode-btn.active {
-  background: var(--accent);
-  color: white;
-}
-
-/* ---- Beginner Instrument Selector ---- */
-
-.beginner-instrument-bar {
-  display: flex;
-  justify-content: center;
-  gap: 0.4rem;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.beginner-inst-btn {
-  font-family: var(--font-body);
-  font-size: 0.75rem;
-  font-weight: 500;
-  padding: 0.3rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: white;
-  color: var(--ink-light);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.beginner-inst-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.beginner-inst-btn.active {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-
-/* ---- Tutorial Overlay ---- */
-
-.tutorial-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tutorial-overlay.hidden {
-  display: none !important;
-}
-
-.tutorial-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(44, 44, 44, 0.4);
-  backdrop-filter: blur(3px);
-}
-
-.tutorial-card {
-  position: relative;
-  z-index: 201;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(44, 44, 44, 0.2);
-  padding: 2rem 2.5rem;
-  max-width: 420px;
-  width: 90%;
-  text-align: center;
-  animation: tutorialSlideIn 0.25s ease;
-}
-
-@keyframes tutorialSlideIn {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.tutorial-step-counter {
-  font-size: 0.7rem;
-  color: var(--ink-faint);
-  letter-spacing: 0.04em;
-  margin-bottom: 0.5rem;
-}
-
-.tutorial-title {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: 1.4rem;
-  margin-bottom: 0.5rem;
-}
-
-.tutorial-text {
-  font-size: 0.9rem;
-  color: var(--ink-light);
-  line-height: 1.5;
-  margin-bottom: 1.5rem;
-}
-
-.tutorial-buttons {
-  display: flex;
-  justify-content: center;
-  gap: 0.75rem;
-}
-
-.tutorial-btn-skip {
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  padding: 0.45rem 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: white;
-  color: var(--ink-faint);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.tutorial-btn-skip:hover {
-  border-color: var(--ink-light);
-  color: var(--ink-light);
-}
-
-.tutorial-btn-next {
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.45rem 1.5rem;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--accent);
-  color: white;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.tutorial-btn-next:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-
-/* Tutorial highlight on target elements */
-.tutorial-highlight {
-  position: relative;
-  z-index: 201;
-  box-shadow: 0 0 0 4px var(--accent), 0 0 16px rgba(107, 140, 166, 0.3);
-  border-radius: 6px;
-}
 
 /* Selection color */
 ::selection {
   background: var(--accent);
   color: white;
+}
+
+/* ---- Mobile / Responsive ---- */
+
+/* Smooth scroll on mobile */
+#score-wrapper {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+  body {
+    padding-bottom: 2rem;
+  }
+
+  .site-header {
+    padding: 1.5rem 0.75rem 0.3rem;
+  }
+
+  .logo {
+    font-size: 2rem;
+  }
+
+  .tagline {
+    font-size: 0.85rem;
+  }
+
+  .score-meta {
+    padding: 0.75rem 0.75rem 0.5rem;
+  }
+
+  .piece-title {
+    font-size: 1.2rem;
+  }
+
+  .meta-details {
+    font-size: 0.75rem;
+    gap: 0.3rem;
+  }
+
+  .note-count {
+    font-size: 0.7rem;
+  }
+
+  /* Transport — compact row */
+  .transport {
+    margin: 0.5rem 0.5rem 0.75rem;
+    padding: 0.4rem 0.6rem;
+    gap: 0.4rem;
+  }
+
+  /* Touch targets: minimum 44px for accessibility */
+  .transport-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .transport-btn-sm {
+    width: 36px;
+    height: 36px;
+    font-size: 0.85rem;
+  }
+
+  #measure-indicator {
+    font-size: 0.8rem;
+    min-width: 70px;
+  }
+
+  .tempo-label {
+    font-size: 0.75rem;
+  }
+
+  /* Shortcut hints — hide on mobile (no keyboard) */
+  .shortcut-hint {
+    display: none;
+  }
+
+  /* Score */
+  #score-wrapper {
+    padding: 0 0.25rem;
+  }
+
+  /* Editor overlay — full screen on mobile */
+  #editor-overlay {
+    align-items: flex-start;
+    padding: 0;
+  }
+
+  #editor {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    padding: 0.75rem;
+    min-height: 100vh;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  .editor-header {
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  #editor-instrument-name {
+    font-size: 1rem;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Toolbar — scroll horizontally instead of wrapping into a mess */
+  .editor-toolbar {
+    gap: 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    padding-bottom: 0.3rem;
+  }
+
+  .toolbar-group {
+    gap: 0.2rem;
+    flex-shrink: 0;
+  }
+
+  .toolbar-label {
+    font-size: 0.55rem;
+  }
+
+  /* Touch-friendly button sizes */
+  .dur-btn {
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0.15rem 0.2rem;
+  }
+
+  .dur-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .acc-btn,
+  .tool-btn {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.5rem;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  #dynamic-select,
+  #key-sig-select,
+  #time-sig-select {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.4rem;
+    min-height: 36px;
+  }
+
+  #dynamic-select {
+    font-size: 0.85rem;
+  }
+
+  #tempo-input {
+    font-size: 0.75rem;
+    width: 50px;
+    min-height: 36px;
+    padding: 0.3rem 0.2rem;
+  }
+
+  /* Editor score area */
+  #editor-score-wrapper {
+    min-height: 150px;
+    cursor: pointer;
+  }
+
+  .editor-hint {
+    font-size: 0.65rem;
+    padding: 0.4rem 0;
+  }
+
+  /* Add instrument */
+  .add-instrument-area {
+    margin: 1rem 0;
+  }
+
+  .add-instrument-btn {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo {
+    font-size: 1.7rem;
+  }
+
+  .piece-title {
+    font-size: 1rem;
+  }
+
+  .transport {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.3rem;
+  }
+
+  .transport-right {
+    display: none;
+  }
+
+  .toolbar-label {
+    display: none;
+  }
+
+  /* Instrument labels — smaller on phone */
+  .instrument-label {
+    font-size: 0.6rem;
+  }
+
+  /* Editor nav buttons */
+  .editor-header .transport-btn-sm {
+    width: 36px;
+    height: 36px;
+  }
+
+  #editor-close {
+    font-size: 1.8rem;
+    padding: 0.2rem 0.5rem;
+  }
 }

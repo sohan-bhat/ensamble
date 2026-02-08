@@ -5,7 +5,7 @@
 import {
   DUR_TO_VEX, DUR_TO_BEATS,
   getKeyAccidentals, pitchToVexKey, displayAccidental, restPosition,
-  buildMeasureNotes,
+  buildMeasureNotes, getEffectiveSignature,
 } from './renderer.js';
 import { API } from './api.js';
 
@@ -75,6 +75,7 @@ export class NoteEditor {
     this.selectedDuration = 'quarter';
     this.selectedAccidental = null; // null, 'sharp', 'flat', 'natural'
     this.restMode = false;
+    this.vibrato = false;
     this.dynamic = 'mf';
     this.placedNotes = []; // notes placed in this editing session (for undo)
 
@@ -94,7 +95,8 @@ export class NoteEditor {
 
   updateScoreData(data) {
     this.scoreData = data;
-    this.keyAccidentals = getKeyAccidentals(data.score.key_signature);
+    const eSig = getEffectiveSignature(this.measure, data);
+    this.keyAccidentals = getKeyAccidentals(eSig.key);
     if (this.isOpen) this._renderEditorStave();
   }
 
@@ -144,6 +146,10 @@ export class NoteEditor {
   // -------------------------------------------------------------------------
   // Render the editor stave (1 measure, zoomed in)
   // -------------------------------------------------------------------------
+  _getEffectiveSig() {
+    return getEffectiveSignature(this.measure, this.scoreData);
+  }
+
   _renderEditorStave() {
     this.editorScoreEl.innerHTML = '';
     const width = this.editorScoreEl.clientWidth || 700;
@@ -153,33 +159,41 @@ export class NoteEditor {
     renderer.resize(width, height);
     const ctx = renderer.getContext();
 
-    const staveW = width - 40;
-    const stave = new VF.Stave(20, 20, staveW);
+    const eSig = this._getEffectiveSig();
+    this.keyAccidentals = getKeyAccidentals(eSig.key);
+
+    const pad = width < 400 ? 10 : 20;
+    const staveW = width - pad * 2;
+    const stave = new VF.Stave(pad, 20, staveW);
     stave.addClef(this.clef);
-    stave.addKeySignature(this.scoreData.score.key_signature);
-    stave.addTimeSignature(this.scoreData.score.time_signature);
+    stave.addKeySignature(eSig.key);
+    stave.addTimeSignature(eSig.time);
     stave.setContext(ctx).draw();
 
     this._editorStave = stave;
     this._editorCtx = ctx;
     this._editorWidth = staveW;
 
+    // Update signature selectors to reflect current measure
+    this._updateSigSelectors(eSig);
+
     // Get notes for this instrument/measure
     const mNotes = this.scoreData.notes.filter(
       n => n.instrument_id === this.instrumentId && n.measure === this.measure
     );
 
-    const [beatsNum] = this.scoreData.score.time_signature.split('/').map(Number);
+    const [beatsNum] = eSig.time.split('/').map(Number);
     const vexNotes = buildMeasureNotes(mNotes, this.clef, this.keyAccidentals, beatsNum);
 
     if (vexNotes.length > 0) {
       const voice = new VF.Voice({
         num_beats: beatsNum,
-        beat_value: parseInt(this.scoreData.score.time_signature.split('/')[1]),
+        beat_value: parseInt(eSig.time.split('/')[1]),
       });
       voice.setMode(VF.Voice.Mode.SOFT);
       voice.addTickables(vexNotes);
-      new VF.Formatter().joinVoices([voice]).format([voice], staveW - 120);
+      const noteAreaWidth = stave.getNoteEndX() - stave.getNoteStartX();
+      new VF.Formatter().joinVoices([voice]).format([voice], noteAreaWidth - 20);
       voice.draw(ctx, stave);
 
       try {
@@ -195,13 +209,56 @@ export class NoteEditor {
     // Draw beat grid
     this._drawBeatGrid();
 
-    // Resize ghost canvas to match — set both internal resolution and CSS size
+    // Resize ghost canvas to match — scale for device pixel ratio (retina)
+    const dpr = window.devicePixelRatio || 1;
     const canvasW = this.editorScoreEl.clientWidth;
     const canvasH = height;
-    this.ghostCanvas.width = canvasW;
-    this.ghostCanvas.height = canvasH;
+    this.ghostCanvas.width = canvasW * dpr;
+    this.ghostCanvas.height = canvasH * dpr;
     this.ghostCanvas.style.width = canvasW + 'px';
     this.ghostCanvas.style.height = canvasH + 'px';
+    this.ghostCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  _updateSigSelectors(eSig) {
+    const keySel = document.getElementById('key-sig-select');
+    const timeSel = document.getElementById('time-sig-select');
+    const tempoInput = document.getElementById('tempo-input');
+    if (keySel) keySel.value = eSig.key;
+    if (timeSel) timeSel.value = eSig.time;
+    if (tempoInput) tempoInput.value = eSig.tempo;
+  }
+
+  async _changeMeasureSignature({ key_signature, time_signature, tempo }) {
+    const eSig = this._getEffectiveSig();
+    const newKey = key_signature || eSig.key;
+    const newTime = time_signature || eSig.time;
+    const newTempo = tempo || eSig.tempo;
+
+    try {
+      const saved = await API.setMeasureSignature(this.measure, {
+        key_signature: newKey,
+        time_signature: newTime,
+        tempo: newTempo,
+      });
+      // Update local data
+      if (!this.scoreData.measureSignatures) this.scoreData.measureSignatures = [];
+      const existing = this.scoreData.measureSignatures.find(s => s.measure === this.measure);
+      if (existing) {
+        existing.key_signature = saved.key_signature;
+        existing.time_signature = saved.time_signature;
+        existing.tempo = saved.tempo;
+      } else {
+        this.scoreData.measureSignatures.push(saved);
+        this.scoreData.measureSignatures.sort((a, b) => a.measure - b.measure);
+      }
+
+      this.keyAccidentals = getKeyAccidentals(newKey);
+      this._renderEditorStave();
+      if (this.onNoteAdded) this.onNoteAdded({ measure: this.measure });
+    } catch (err) {
+      console.error('Failed to change measure signature:', err);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -210,7 +267,8 @@ export class NoteEditor {
   _drawBeatGrid() {
     if (!this._editorStave) return;
     const stave = this._editorStave;
-    const [beatsNum] = this.scoreData.score.time_signature.split('/').map(Number);
+    const eSig = this._getEffectiveSig();
+    const [beatsNum] = eSig.time.split('/').map(Number);
 
     const noteStartX = stave.getNoteStartX();
     const noteEndX = stave.getNoteEndX();
@@ -256,12 +314,14 @@ export class NoteEditor {
   // Ghost note drawing
   // -------------------------------------------------------------------------
   _clearGhost() {
-    this.ghostCtx.clearRect(0, 0, this.ghostCanvas.width, this.ghostCanvas.height);
+    const dpr = window.devicePixelRatio || 1;
+    this.ghostCtx.clearRect(0, 0, this.ghostCanvas.width / dpr, this.ghostCanvas.height / dpr);
   }
 
-  _drawGhost(x, y, pitch, snapX) {
+  _drawGhost(x, y, pitch, snapX, color) {
     this._clearGhost();
     const ctx = this.ghostCtx;
+    const c = color || '#6B8CA6';
     ctx.save();
 
     // Pitch highlight band across the music area
@@ -269,32 +329,16 @@ export class NoteEditor {
       const stave = this._editorStave;
       const nsX = stave.getNoteStartX();
       const neX = stave.getNoteEndX();
-      ctx.fillStyle = '#6B8CA6';
+      ctx.fillStyle = c;
       ctx.globalAlpha = 0.06;
       ctx.fillRect(nsX, y - 4, neX - nsX, 8);
     }
 
-    // Snap indicator line (shows where note will land on beat grid)
-    if (snapX != null && Math.abs(snapX - x) > 3) {
-      ctx.globalAlpha = 0.25;
-      ctx.beginPath();
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = '#6B8CA6';
-      ctx.lineWidth = 1;
-      const stave = this._editorStave;
-      if (stave) {
-        ctx.moveTo(snapX, stave.getYForLine(0) - 10);
-        ctx.lineTo(snapX, stave.getYForLine(4) + 10);
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = 0.5;
 
     if (this.restMode) {
       // Draw rest symbol placeholder
-      ctx.fillStyle = '#6B8CA6';
+      ctx.fillStyle = c;
       ctx.font = '24px serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -305,12 +349,12 @@ export class NoteEditor {
       const filled = ['quarter', 'eighth', 'sixteenth'].includes(this.selectedDuration);
       ctx.beginPath();
       ctx.ellipse(x, y, 7, 5, -0.2, 0, Math.PI * 2);
-      ctx.fillStyle = '#6B8CA6';
+      ctx.fillStyle = c;
       if (filled) {
         ctx.fill();
       } else {
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#6B8CA6';
+        ctx.strokeStyle = c;
         ctx.stroke();
       }
 
@@ -326,7 +370,7 @@ export class NoteEditor {
           ctx.moveTo(x - 6, y);
           ctx.lineTo(x - 6, y + 35);
         }
-        ctx.strokeStyle = '#6B8CA6';
+        ctx.strokeStyle = c;
         ctx.lineWidth = 1.2;
         ctx.stroke();
       }
@@ -337,7 +381,7 @@ export class NoteEditor {
       // Draw accidental symbol
       if (this.selectedAccidental) {
         const symbols = { sharp: '♯', flat: '♭', natural: '♮' };
-        ctx.fillStyle = '#6B8CA6';
+        ctx.fillStyle = c;
         ctx.font = '16px serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -345,7 +389,7 @@ export class NoteEditor {
       }
 
       // Show pitch label
-      ctx.fillStyle = '#6B8CA6';
+      ctx.fillStyle = c;
       ctx.font = '11px "DM Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -382,6 +426,43 @@ export class NoteEditor {
   }
 
   // -------------------------------------------------------------------------
+  // Replace highlight — red tint on existing note being hovered for replace
+  // -------------------------------------------------------------------------
+  _highlightExistingNote(beat) {
+    if (!this._editorStave) return;
+    const note = this.scoreData.notes.find(
+      n => n.instrument_id === this.instrumentId &&
+           n.measure === this.measure &&
+           Math.abs(n.beat - beat) < 0.01
+    );
+    if (!note) return;
+
+    const noteX = this._snapX(note.beat);
+    const linePos = pitchToLinePos(note.pitch, this.clef);
+    const noteY = this._snapY(linePos);
+
+    const ctx = this.ghostCtx;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+
+    // Red circle around the existing note
+    ctx.beginPath();
+    ctx.arc(noteX, noteY, 12, 0, Math.PI * 2);
+    ctx.fillStyle = '#E53935';
+    ctx.fill();
+
+    // "x" symbol
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 14px "DM Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u00d7', noteX, noteY);
+
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------------------
   // Mouse → pitch/beat conversion
   // -------------------------------------------------------------------------
   _yToLinePos(y) {
@@ -398,12 +479,12 @@ export class NoteEditor {
   _xToBeat(x) {
     if (!this._editorStave) return 1;
     const stave = this._editorStave;
-    // Music area starts after clef/keysig/timesig
     const noteStartX = stave.getNoteStartX();
     const noteEndX = stave.getNoteEndX();
     const musicWidth = noteEndX - noteStartX;
 
-    const [beatsNum] = this.scoreData.score.time_signature.split('/').map(Number);
+    const eSig = this._getEffectiveSig();
+    const [beatsNum] = eSig.time.split('/').map(Number);
     const durBeats = DUR_TO_BEATS[this.selectedDuration] || 1;
     const subdivisions = beatsNum / durBeats;
 
@@ -431,7 +512,8 @@ export class NoteEditor {
     const noteEndX = stave.getNoteEndX();
     const musicWidth = noteEndX - noteStartX;
 
-    const [beatsNum] = this.scoreData.score.time_signature.split('/').map(Number);
+    const eSig = this._getEffectiveSig();
+    const [beatsNum] = eSig.time.split('/').map(Number);
     const fraction = (beat - 1) / beatsNum;
     return noteStartX + fraction * musicWidth;
   }
@@ -469,9 +551,37 @@ export class NoteEditor {
       document.getElementById('rest-toggle').classList.toggle('active', this.restMode);
     });
 
+    // Vibrato toggle
+    document.getElementById('vibrato-toggle').addEventListener('click', () => {
+      this.vibrato = !this.vibrato;
+      document.getElementById('vibrato-toggle').classList.toggle('active', this.vibrato);
+    });
+
     // Dynamic
     document.getElementById('dynamic-select').addEventListener('change', (e) => {
       this.dynamic = e.target.value;
+    });
+
+    // Key signature change
+    document.getElementById('key-sig-select').addEventListener('change', (e) => {
+      this._changeMeasureSignature({ key_signature: e.target.value });
+    });
+
+    // Time signature change
+    document.getElementById('time-sig-select').addEventListener('change', (e) => {
+      this._changeMeasureSignature({ time_signature: e.target.value });
+    });
+
+    // Tempo (BPM) change
+    document.getElementById('tempo-input').addEventListener('change', (e) => {
+      const val = parseInt(e.target.value);
+      if (val >= 20 && val <= 300) {
+        this._changeMeasureSignature({ tempo: val });
+      } else {
+        // Reset to current effective tempo
+        const eSig = this._getEffectiveSig();
+        e.target.value = eSig.tempo;
+      }
     });
 
     // Undo
@@ -496,13 +606,13 @@ export class NoteEditor {
   _bindEditorInteraction() {
     const wrapper = document.getElementById('editor-score-wrapper');
 
-    wrapper.addEventListener('mousemove', (e) => {
+    // Shared logic for pointer position (mouse or touch)
+    const handlePointerMove = (clientX, clientY) => {
       if (!this.isOpen || !this._editorStave) return;
       const rect = this.ghostCanvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
 
-      // Clamp cursor X to the music area
       const noteStartX = this._editorStave.getNoteStartX();
       const noteEndX = this._editorStave.getNoteEndX();
       const clampedX = Math.max(noteStartX, Math.min(mx, noteEndX));
@@ -514,22 +624,26 @@ export class NoteEditor {
 
       const pitch = linePosToPitch(linePos, this.clef, this.keyAccidentals);
       this._currentGhost = { pitch, beat, linePos, x: snappedX, y: snappedY };
-      // Draw ghost at cursor X (clamped), snapped Y; pass snappedX for beat indicator
-      this._drawGhost(clampedX, snappedY, pitch, snappedX);
-    });
 
-    wrapper.addEventListener('mouseleave', () => {
-      this._clearGhost();
-      this._currentGhost = null;
-    });
+      const existing = this.scoreData.notes.find(
+        n => n.instrument_id === this.instrumentId &&
+             n.measure === this.measure &&
+             !n.is_rest &&
+             Math.abs(n.beat - beat) < 0.01
+      );
 
-    wrapper.addEventListener('click', (e) => {
+      if (existing) {
+        this._drawGhost(snappedX, snappedY, pitch, null, '#4CAF50');
+        this._highlightExistingNote(existing.beat);
+      } else {
+        this._drawGhost(snappedX, snappedY, pitch, null, '#6B8CA6');
+      }
+    };
+
+    const handlePointerPlace = () => {
       if (!this.isOpen || !this._currentGhost) return;
-      e.stopPropagation();
-
       const { pitch, beat } = this._currentGhost;
 
-      // Check if clicking on an existing note at this beat — if so, delete it
       const existing = this.scoreData.notes.find(
         n => n.instrument_id === this.instrumentId &&
              n.measure === this.measure &&
@@ -540,6 +654,39 @@ export class NoteEditor {
       } else {
         this._placeNote(pitch, beat);
       }
+    };
+
+    // Mouse events
+    wrapper.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
+    wrapper.addEventListener('mouseleave', () => {
+      this._clearGhost();
+      this._currentGhost = null;
+    });
+    wrapper.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handlePointerPlace();
+    });
+
+    // Touch events (mobile)
+    wrapper.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // prevent scrolling while editing
+      const t = e.touches[0];
+      if (t) handlePointerMove(t.clientX, t.clientY);
+    }, { passive: false });
+
+    wrapper.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      if (t) handlePointerMove(t.clientX, t.clientY);
+    }, { passive: true });
+
+    wrapper.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      handlePointerPlace();
+      // Clear ghost after a short delay so user sees feedback
+      setTimeout(() => {
+        this._clearGhost();
+        this._currentGhost = null;
+      }, 200);
     });
   }
 
@@ -548,7 +695,8 @@ export class NoteEditor {
   // -------------------------------------------------------------------------
   async _placeNote(pitch, beat) {
     // Check beat capacity — don't exceed time signature
-    const [beatsNum] = this.scoreData.score.time_signature.split('/').map(Number);
+    const eSig = this._getEffectiveSig();
+    const [beatsNum] = eSig.time.split('/').map(Number);
     const existingNotes = this.scoreData.notes.filter(
       n => n.instrument_id === this.instrumentId && n.measure === this.measure
     );
@@ -582,6 +730,7 @@ export class NoteEditor {
       is_rest: this.restMode,
       accidental: this.selectedAccidental || null,
       dynamic: this.dynamic,
+      vibrato: this.vibrato,
       session_id: this.sessionId,
     };
 
@@ -656,5 +805,10 @@ export class NoteEditor {
   toggleRest() {
     this.restMode = !this.restMode;
     document.getElementById('rest-toggle').classList.toggle('active', this.restMode);
+  }
+
+  toggleVibrato() {
+    this.vibrato = !this.vibrato;
+    document.getElementById('vibrato-toggle').classList.toggle('active', this.vibrato);
   }
 }

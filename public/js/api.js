@@ -50,6 +50,26 @@ export const API = {
     return res.json();
   },
 
+  /** Set key/time signature/tempo for a specific measure */
+  async setMeasureSignature(measure, { key_signature, time_signature, tempo }) {
+    const res = await fetch(`/api/measure-signature/${measure}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key_signature, time_signature, tempo }),
+    });
+    if (!res.ok) throw new Error('Failed to set measure signature');
+    return res.json();
+  },
+
+  /** Delete a measure signature override */
+  async deleteMeasureSignature(measure) {
+    const res = await fetch(`/api/measure-signature/${measure}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error('Failed to delete measure signature');
+    return res.json();
+  },
+
   /** Fetch total note count */
   async fetchNoteCount() {
     const res = await fetch('/api/notes/count');
