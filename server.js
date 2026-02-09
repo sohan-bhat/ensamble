@@ -66,10 +66,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notes_created ON notes(created_at);
 `);
 
-// Migration: add tempo column if it doesn't exist (for existing DBs)
-try {
-  db.exec('ALTER TABLE measure_signatures ADD COLUMN tempo INTEGER');
-} catch (_) { /* column already exists */ }
+// Migrations for existing DBs
+try { db.exec('ALTER TABLE measure_signatures ADD COLUMN tempo INTEGER'); } catch (_) {}
+try { db.exec('ALTER TABLE notes ADD COLUMN city TEXT'); } catch (_) {}
+try { db.exec('ALTER TABLE notes ADD COLUMN country TEXT'); } catch (_) {}
 
 // ---------------------------------------------------------------------------
 // Seed data
@@ -117,10 +117,11 @@ app.post('/api/notes', (req, res) => {
   }
 
   const id = randomUUID();
+  const { city, country } = req.body;
   db.prepare(`
-    INSERT INTO notes (id, instrument_id, pitch, measure, beat, duration, is_rest, accidental, dynamic, vibrato, session_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, instrument_id, pitch, measure, beat, duration, is_rest ? 1 : 0, accidental || null, dynamic || 'mf', vibrato ? 1 : 0, session_id);
+    INSERT INTO notes (id, instrument_id, pitch, measure, beat, duration, is_rest, accidental, dynamic, vibrato, session_id, city, country)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, instrument_id, pitch, measure, beat, duration, is_rest ? 1 : 0, accidental || null, dynamic || 'mf', vibrato ? 1 : 0, session_id, city || null, country || null);
 
   const note = db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
   res.json(note);
@@ -194,6 +195,26 @@ app.get('/api/notes/since/:timestamp', (req, res) => {
 app.get('/api/notes/count', (req, res) => {
   const { count } = db.prepare('SELECT COUNT(*) as count FROM notes WHERE is_rest = 0').get();
   res.json({ count });
+});
+
+// Recent contributions with location
+app.get('/api/contributions', (req, res) => {
+  const contributions = db.prepare(`
+    SELECT city, country, created_at
+    FROM notes
+    WHERE city IS NOT NULL AND country IS NOT NULL AND is_rest = 0
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).all();
+  // Also get the most recent contribution with location
+  const latest = db.prepare(`
+    SELECT city, country, created_at
+    FROM notes
+    WHERE city IS NOT NULL AND country IS NOT NULL AND is_rest = 0
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get();
+  res.json({ contributions, latest });
 });
 
 // ---------------------------------------------------------------------------

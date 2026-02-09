@@ -76,4 +76,11 @@ export const API = {
     if (!res.ok) throw new Error('Failed to fetch count');
     return res.json();
   },
+
+  /** Fetch recent contributions with location */
+  async fetchContributions() {
+    const res = await fetch('/api/contributions');
+    if (!res.ok) throw new Error('Failed to fetch contributions');
+    return res.json();
+  },
 };

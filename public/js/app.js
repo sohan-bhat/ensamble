@@ -3,7 +3,7 @@
 // =========================================================================
 
 import { API } from './api.js';
-import { ScoreRenderer } from './renderer.js';
+import { ScoreRenderer, getEffectiveSignature } from './renderer.js';
 import { NoteEditor } from './editor.js';
 import { PlaybackEngine } from './playback.js';
 
@@ -18,6 +18,9 @@ const SESSION_ID = crypto.randomUUID();
 let scoreData = null;
 let currentMeasure = 1;
 let lastFetchTime = null;
+// Restore cached location immediately so it's available before geocode resolves
+const cachedLoc = localStorage.getItem('ensemble_location');
+let userLocation = cachedLoc ? JSON.parse(cachedLoc) : { city: null, country: null };
 
 // ---------------------------------------------------------------------------
 // Components
@@ -42,10 +45,7 @@ async function init() {
   // Set metadata in UI
   const { score } = scoreData;
   document.querySelector('.piece-title').textContent = score.title;
-  document.getElementById('tempo-value').textContent = score.tempo;
-  document.querySelector('.key-sig').textContent = formatKey(score.key_signature);
-  document.querySelector('.time-sig').textContent = score.time_signature;
-  document.querySelector('.tempo-display').innerHTML = `&#9833; = ${score.tempo}`;
+  updateTransportInfo(currentMeasure);
 
   updateNoteCount();
 
@@ -59,9 +59,10 @@ async function init() {
     onNoteAdded: (note) => {
       renderer.render(scoreData);
       updateNoteCount();
+      updateLastLocation();
       // Set playback start to this measure so user hears their new note
       currentMeasure = note.measure;
-      document.getElementById('measure-indicator').textContent = `Measure ${currentMeasure}`;
+      document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
     },
     onNoteDeleted: () => {
       renderer.render(scoreData);
@@ -69,10 +70,14 @@ async function init() {
     },
   });
 
+  // Get user location and pass to editor
+  initGeolocation();
+
   // Playback measure callback
   playback.onMeasureChange = (m) => {
     currentMeasure = m;
-    document.getElementById('measure-indicator').textContent = `Measure ${m}`;
+    document.getElementById('measure-indicator').textContent = `Bar ${m}`;
+    updateTransportInfo(m);
   };
 
   // Playhead line
@@ -95,11 +100,69 @@ async function init() {
     playheadEl.style.height = `${bounds.bottomY - bounds.topY}px`;
   };
 
+  // Seek overlay — click/drag on score to jump playback position
+  const seekOverlay = document.createElement('div');
+  seekOverlay.className = 'seek-overlay';
+  document.getElementById('score-wrapper').appendChild(seekOverlay);
+
+  function seekToX(clientX) {
+    if (!scoreData) return;
+    const wrapper = document.getElementById('score-wrapper');
+    const rect = wrapper.getBoundingClientRect();
+    const x = clientX - rect.left + wrapper.scrollLeft;
+
+    // Find which measure this X falls in
+    for (const s of renderer.staveMap) {
+      if (x >= s.x && x <= s.x + s.width && s.instrumentId === scoreData.instruments[0].id) {
+        currentMeasure = s.measure;
+        document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
+        updateTransportInfo(currentMeasure);
+
+        // If playing, restart from this measure
+        if (playback.playing) {
+          playback.stop();
+          setPlayingUI(true);
+          playback.play(scoreData, currentMeasure).then(() => {
+            const checkStop = setInterval(() => {
+              if (!playback.playing) { setPlayingUI(false); clearInterval(checkStop); }
+            }, 200);
+          });
+        }
+        return;
+      }
+    }
+  }
+
+  seekOverlay.addEventListener('mousedown', (e) => {
+    seekToX(e.clientX);
+    const onMove = (ev) => seekToX(ev.clientX);
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  seekOverlay.addEventListener('touchstart', (e) => {
+    if (e.touches[0]) seekToX(e.touches[0].clientX);
+  }, { passive: true });
+
+  seekOverlay.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches[0]) seekToX(e.touches[0].clientX);
+  }, { passive: false });
+
+  // Show seek overlay when playing
+  const origSetPlayingUI = setPlayingUI;
+
   // Bind UI
   bindTransport();
   bindScoreClicks();
   bindKeyboard();
+  bindHistory();
   startPolling();
+  updateLastLocation();
 
   // Re-render on resize / orientation change for responsive layout
   let resizeTimer;
@@ -122,6 +185,20 @@ function formatKey(key) {
     Db: 'D♭ Major', Gb: 'G♭ Major', Cb: 'C♭ Major',
   };
   return names[key] || key + ' Major';
+}
+
+// ---------------------------------------------------------------------------
+// Update transport bar info for a given measure
+// ---------------------------------------------------------------------------
+function updateTransportInfo(measure) {
+  if (!scoreData) return;
+  const eSig = getEffectiveSignature(measure, scoreData);
+  const keyEl = document.getElementById('transport-key');
+  const timeEl = document.getElementById('transport-time');
+  const tempoEl = document.getElementById('transport-tempo');
+  if (keyEl) keyEl.textContent = formatKey(eSig.key);
+  if (timeEl) timeEl.textContent = eSig.time;
+  if (tempoEl) tempoEl.innerHTML = `&#9833; = ${eSig.tempo}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,14 +229,16 @@ function bindTransport() {
   prevBtn.addEventListener('click', () => {
     if (currentMeasure > 1) {
       currentMeasure--;
-      document.getElementById('measure-indicator').textContent = `Measure ${currentMeasure}`;
+      document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
+      updateTransportInfo(currentMeasure);
     }
   });
 
   nextBtn.addEventListener('click', () => {
     if (scoreData && currentMeasure < scoreData.score.total_measures) {
       currentMeasure++;
-      document.getElementById('measure-indicator').textContent = `Measure ${currentMeasure}`;
+      document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
+      updateTransportInfo(currentMeasure);
     }
   });
 }
@@ -185,6 +264,8 @@ async function togglePlayback() {
 function setPlayingUI(playing) {
   document.getElementById('play-icon').style.display = playing ? 'none' : 'block';
   document.getElementById('pause-icon').style.display = playing ? 'block' : 'none';
+  const overlay = document.querySelector('.seek-overlay');
+  if (overlay) overlay.style.display = playing ? 'block' : 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +301,8 @@ function bindKeyboard() {
           editor.prevMeasure();
         } else if (currentMeasure > 1) {
           currentMeasure--;
-          document.getElementById('measure-indicator').textContent = `Measure ${currentMeasure}`;
+          document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
+          updateTransportInfo(currentMeasure);
         }
         break;
       case 'ArrowRight':
@@ -229,7 +311,8 @@ function bindKeyboard() {
           editor.nextMeasure();
         } else if (scoreData && currentMeasure < scoreData.score.total_measures) {
           currentMeasure++;
-          document.getElementById('measure-indicator').textContent = `Measure ${currentMeasure}`;
+          document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
+          updateTransportInfo(currentMeasure);
         }
         break;
       case 'e':
@@ -295,6 +378,105 @@ function startPolling() {
       lastFetchTime = new Date().toISOString();
     } catch (_) {}
   }, 15000);
+}
+
+// ---------------------------------------------------------------------------
+// Geolocation
+// ---------------------------------------------------------------------------
+async function initGeolocation() {
+  // Apply cached location to editor right away
+  if (editor && (userLocation.city || userLocation.country)) {
+    editor.location = userLocation;
+  }
+  // Use IP-based geolocation — no permission needed, works on all devices
+  try {
+    const res = await fetch('https://ipapi.co/json/');
+    if (!res.ok) return;
+    const data = await res.json();
+    const parts = [data.city, data.region, data.country_name].filter(Boolean);
+    userLocation.city = parts.slice(0, -1).join(', ') || null;
+    userLocation.country = data.country_name || null;
+    localStorage.setItem('ensemble_location', JSON.stringify(userLocation));
+    if (editor) editor.location = userLocation;
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// Last location display
+// ---------------------------------------------------------------------------
+async function updateLastLocation() {
+  try {
+    const { latest } = await API.fetchContributions();
+    const el = document.getElementById('last-location');
+    if (el && latest && latest.city && latest.country) {
+      el.textContent = `last updated from ${latest.city}, ${latest.country}`;
+    }
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// History popup
+// ---------------------------------------------------------------------------
+function bindHistory() {
+  const historyBtn = document.getElementById('history-btn');
+  const overlay = document.getElementById('history-overlay');
+  const closeBtn = document.getElementById('history-close');
+
+  historyBtn.addEventListener('click', async () => {
+    overlay.classList.remove('hidden');
+    const listEl = document.getElementById('history-list');
+    listEl.innerHTML = '<p class="history-empty">Loading...</p>';
+
+    try {
+      const { contributions } = await API.fetchContributions();
+      if (contributions.length === 0) {
+        listEl.innerHTML = '<p class="history-empty">No contributions with location yet.</p>';
+        return;
+      }
+      listEl.innerHTML = '';
+      for (const c of contributions) {
+        const entry = document.createElement('div');
+        entry.className = 'history-entry';
+        const timeAgo = formatTimeAgo(c.created_at);
+        entry.innerHTML = `
+          <span class="history-location">${escapeHtml(c.city)}, ${escapeHtml(c.country)}</span>
+          <span class="history-time">${timeAgo}</span>
+        `;
+        listEl.appendChild(entry);
+      }
+    } catch (_) {
+      listEl.innerHTML = '<p class="history-empty">Failed to load history.</p>';
+    }
+  });
+
+  closeBtn.addEventListener('click', () => {
+    overlay.classList.add('hidden');
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.add('hidden');
+  });
+}
+
+function formatTimeAgo(isoString) {
+  const date = new Date(isoString + 'Z');
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return date.toLocaleDateString();
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // ---------------------------------------------------------------------------

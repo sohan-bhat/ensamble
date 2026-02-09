@@ -20,14 +20,22 @@
   <!-- Score metadata -->
   <div class="score-meta">
     <h2 class="piece-title">Global Symphonia No. 1</h2>
-    <div class="meta-details">
-      <span class="key-sig">D Major</span>
-      <span class="meta-dot">&middot;</span>
-      <span class="time-sig">4/4</span>
-      <span class="meta-dot">&middot;</span>
-      <span class="tempo-display">&#9833; = 100</span>
+    <div class="note-count"><span id="note-count-num">0</span> notes shared across the world</div>
+    <div class="location-info">
+      <span id="last-location"></span>
+      <button id="history-btn" class="history-btn" title="View contribution history">History</button>
     </div>
-    <div class="note-count"><span id="note-count-num">0</span> notes contributed from around the world</div>
+  </div>
+
+  <!-- Contribution history popup -->
+  <div id="history-overlay" class="hidden">
+    <div id="history-popup">
+      <div class="history-header">
+        <span class="history-title">Contribution History</span>
+        <button id="history-close">&times;</button>
+      </div>
+      <div id="history-list"></div>
+    </div>
   </div>
 
   <!-- Transport controls -->
@@ -49,12 +57,16 @@
       </button>
     </div>
     <div class="transport-center">
-      <button id="prev-measure" class="transport-btn-sm" title="Previous measure (&larr;)">&larr;</button>
-      <span id="measure-indicator">Measure 1</span>
-      <button id="next-measure" class="transport-btn-sm" title="Next measure (&rarr;)">&rarr;</button>
+      <button id="prev-measure" class="transport-btn-sm" title="Previous bar (&larr;)">&larr;</button>
+      <span id="measure-indicator">Bar 1</span>
+      <button id="next-measure" class="transport-btn-sm" title="Next bar (&rarr;)">&rarr;</button>
     </div>
     <div class="transport-right">
-      <span class="tempo-label">&#9833; = <span id="tempo-value">100</span></span>
+      <span class="transport-info">
+        <span id="transport-key" class="transport-tag">D Major</span>
+        <span id="transport-time" class="transport-tag">4/4</span>
+        <span id="transport-tempo" class="transport-tag">&#9833; = 100</span>
+      </span>
     </div>
   </div>
 
@@ -85,7 +97,7 @@
       <div class="editor-header">
         <span id="editor-instrument-name">Violin I</span>
         <button id="editor-prev-measure" class="transport-btn-sm" title="Previous measure (&larr;)">&larr;</button>
-        <span id="editor-measure-label">Measure 1</span>
+        <span id="editor-measure-label">Bar 1</span>
         <button id="editor-next-measure" class="transport-btn-sm" title="Next measure (&rarr;)">&rarr;</button>
         <button id="editor-close" title="Close (Esc)">&times;</button>
       </div>

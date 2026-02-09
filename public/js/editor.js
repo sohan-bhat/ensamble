@@ -78,6 +78,7 @@ export class NoteEditor {
     this.vibrato = false;
     this.dynamic = 'mf';
     this.placedNotes = []; // notes placed in this editing session (for undo)
+    this.location = { city: null, country: null };
 
     // DOM
     this.overlay = document.getElementById('editor-overlay');
@@ -112,7 +113,7 @@ export class NoteEditor {
     this.isOpen = true;
 
     document.getElementById('editor-instrument-name').textContent = instrumentName;
-    document.getElementById('editor-measure-label').textContent = `Measure ${measure}`;
+    document.getElementById('editor-measure-label').textContent = `Bar ${measure}`;
     this.overlay.classList.remove('hidden');
 
     this._renderEditorStave();
@@ -129,7 +130,7 @@ export class NoteEditor {
     if (this.measure > 1) {
       this.measure--;
       this.placedNotes = [];
-      document.getElementById('editor-measure-label').textContent = `Measure ${this.measure}`;
+      document.getElementById('editor-measure-label').textContent = `Bar ${this.measure}`;
       this._renderEditorStave();
     }
   }
@@ -138,7 +139,7 @@ export class NoteEditor {
     if (this.scoreData && this.measure < this.scoreData.score.total_measures) {
       this.measure++;
       this.placedNotes = [];
-      document.getElementById('editor-measure-label').textContent = `Measure ${this.measure}`;
+      document.getElementById('editor-measure-label').textContent = `Bar ${this.measure}`;
       this._renderEditorStave();
     }
   }
@@ -732,6 +733,8 @@ export class NoteEditor {
       dynamic: this.dynamic,
       vibrato: this.vibrato,
       session_id: this.sessionId,
+      city: this.location.city || null,
+      country: this.location.country || null,
     };
 
     try {

@@ -124,6 +124,12 @@ function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
       if (acc) {
         sn.addModifier(new VF.Accidental(acc), 0);
       }
+      // Add vibrato marking if enabled
+      if (note.vibrato) {
+        try {
+          sn.addModifier(new VF.Vibrato());
+        } catch (_) { /* vibrato modifier not critical */ }
+      }
       // Store the note id for later reference
       sn._ensembleId = note.id;
       vexNotes.push(sn);
