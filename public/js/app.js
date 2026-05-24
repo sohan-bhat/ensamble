@@ -1,37 +1,21 @@
-// =========================================================================
-// Ensemble — Main Application
-// =========================================================================
-
 import { API } from './api.js';
 import { ScoreRenderer, getEffectiveSignature } from './renderer.js';
 import { NoteEditor } from './editor.js';
 import { PlaybackEngine } from './playback.js';
 
-// ---------------------------------------------------------------------------
-// Session
-// ---------------------------------------------------------------------------
 const SESSION_ID = crypto.randomUUID();
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
 let scoreData = null;
 let currentMeasure = 1;
-let lastFetchTime = null;
-// Restore cached location immediately so it's available before geocode resolves
+
+// Apply cached location synchronously so notes created before the geocode fetch resolves still carry city/country.
 const cachedLoc = localStorage.getItem('ensemble_location');
 let userLocation = cachedLoc ? JSON.parse(cachedLoc) : { city: null, country: null };
 
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
 const renderer = new ScoreRenderer('score');
 const playback = new PlaybackEngine();
-let editor = null; // initialized after first fetch
+let editor = null;
 
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
 async function init() {
   try {
     scoreData = await API.fetchScore();
@@ -42,17 +26,13 @@ async function init() {
     return;
   }
 
-  // Set metadata in UI
   const { score } = scoreData;
   document.querySelector('.piece-title').textContent = score.title;
   updateTransportInfo(currentMeasure);
 
   updateNoteCount();
-
-  // Render score
   renderer.render(scoreData);
 
-  // Init editor
   editor = new NoteEditor({
     sessionId: SESSION_ID,
     scoreData,
@@ -60,7 +40,7 @@ async function init() {
       renderer.render(scoreData);
       updateNoteCount();
       updateLastLocation();
-      // Set playback start to this measure so user hears their new note
+      // Move playhead to the just-added note so pressing play hears it immediately.
       currentMeasure = note.measure;
       document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
     },
@@ -70,17 +50,14 @@ async function init() {
     },
   });
 
-  // Get user location and pass to editor
   initGeolocation();
 
-  // Playback measure callback
   playback.onMeasureChange = (m) => {
     currentMeasure = m;
     document.getElementById('measure-indicator').textContent = `Bar ${m}`;
     updateTransportInfo(m);
   };
 
-  // Playhead line
   const playheadEl = document.createElement('div');
   playheadEl.className = 'playhead-line';
   document.getElementById('score-wrapper').appendChild(playheadEl);
@@ -100,7 +77,7 @@ async function init() {
     playheadEl.style.height = `${bounds.bottomY - bounds.topY}px`;
   };
 
-  // Seek overlay — click/drag on score to jump playback position
+  // Click/drag on the score during playback jumps the playhead.
   const seekOverlay = document.createElement('div');
   seekOverlay.className = 'seek-overlay';
   document.getElementById('score-wrapper').appendChild(seekOverlay);
@@ -111,14 +88,13 @@ async function init() {
     const rect = wrapper.getBoundingClientRect();
     const x = clientX - rect.left + wrapper.scrollLeft;
 
-    // Find which measure this X falls in
+    // Only match staves on the first instrument so we get one measure per X, not five overlapping ones.
     for (const s of renderer.staveMap) {
       if (x >= s.x && x <= s.x + s.width && s.instrumentId === scoreData.instruments[0].id) {
         currentMeasure = s.measure;
         document.getElementById('measure-indicator').textContent = `Bar ${currentMeasure}`;
         updateTransportInfo(currentMeasure);
 
-        // If playing, restart from this measure
         if (playback.playing) {
           playback.stop();
           setPlayingUI(true);
@@ -153,18 +129,13 @@ async function init() {
     if (e.touches[0]) seekToX(e.touches[0].clientX);
   }, { passive: false });
 
-  // Show seek overlay when playing
-  const origSetPlayingUI = setPlayingUI;
-
-  // Bind UI
   bindTransport();
   bindScoreClicks();
   bindKeyboard();
   bindHistory();
-  startPolling();
+  startEventStream();
   updateLastLocation();
 
-  // Re-render on resize / orientation change for responsive layout
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
@@ -174,9 +145,6 @@ async function init() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Format key signature for display
-// ---------------------------------------------------------------------------
 function formatKey(key) {
   const names = {
     C: 'C Major', G: 'G Major', D: 'D Major', A: 'A Major',
@@ -187,9 +155,6 @@ function formatKey(key) {
   return names[key] || key + ' Major';
 }
 
-// ---------------------------------------------------------------------------
-// Update transport bar info for a given measure
-// ---------------------------------------------------------------------------
 function updateTransportInfo(measure) {
   if (!scoreData) return;
   const eSig = getEffectiveSignature(measure, scoreData);
@@ -201,9 +166,6 @@ function updateTransportInfo(measure) {
   if (tempoEl) tempoEl.innerHTML = `&#9833; = ${eSig.tempo}`;
 }
 
-// ---------------------------------------------------------------------------
-// Note count
-// ---------------------------------------------------------------------------
 async function updateNoteCount() {
   try {
     const { count } = await API.fetchNoteCount();
@@ -211,9 +173,6 @@ async function updateNoteCount() {
   } catch (_) {}
 }
 
-// ---------------------------------------------------------------------------
-// Transport controls
-// ---------------------------------------------------------------------------
 function bindTransport() {
   const playBtn = document.getElementById('play-btn');
   const stopBtn = document.getElementById('stop-btn');
@@ -251,7 +210,6 @@ async function togglePlayback() {
     setPlayingUI(true);
     await playback.play(scoreData, currentMeasure);
 
-    // When playback finishes naturally, reset UI
     const checkStop = setInterval(() => {
       if (!playback.playing) {
         setPlayingUI(false);
@@ -268,9 +226,6 @@ function setPlayingUI(playing) {
   if (overlay) overlay.style.display = playing ? 'block' : 'none';
 }
 
-// ---------------------------------------------------------------------------
-// Score click → open editor
-// ---------------------------------------------------------------------------
 function bindScoreClicks() {
   document.getElementById('score').addEventListener('click', (e) => {
     if (editor && editor.isOpen) return;
@@ -282,12 +237,8 @@ function bindScoreClicks() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Keyboard shortcuts
-// ---------------------------------------------------------------------------
 function bindKeyboard() {
   document.addEventListener('keydown', (e) => {
-    // Don't trigger shortcuts when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
 
     switch (e.key) {
@@ -317,8 +268,8 @@ function bindKeyboard() {
         break;
       case 'e':
       case 'E':
-        // Open editor on currently selected instrument (first instrument by default)
         if (editor && !editor.isOpen && scoreData) {
+          // Editor defaults to the first instrument — users can switch from within the editor.
           const inst = scoreData.instruments[0];
           editor.updateScoreData(scoreData);
           editor.open(inst.id, inst.name, inst.clef, currentMeasure);
@@ -350,45 +301,78 @@ function bindKeyboard() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Polling for new notes from other contributors
-// ---------------------------------------------------------------------------
-function startPolling() {
-  lastFetchTime = new Date().toISOString();
+// Live sync via SSE. EventSource auto-reconnects on transient drops; on each
+// (re)open we refetch the full score so we never get out of sync after a gap.
+function startEventStream() {
+  const es = new EventSource('/api/events');
+  let firstOpen = true;
 
-  setInterval(async () => {
-    if (!lastFetchTime) return;
+  es.addEventListener('open', async () => {
+    // Skip the initial open — the page already loaded the score during init().
+    if (firstOpen) { firstOpen = false; return; }
     try {
-      const { notes: newNotes } = await API.fetchNotesSince(lastFetchTime);
-      if (newNotes.length > 0) {
-        // Merge new notes (avoid duplicates)
-        const existingIds = new Set(scoreData.notes.map(n => n.id));
-        let added = 0;
-        for (const n of newNotes) {
-          if (!existingIds.has(n.id)) {
-            scoreData.notes.push(n);
-            added++;
-          }
-        }
-        if (added > 0) {
-          renderer.render(scoreData);
-          updateNoteCount();
-        }
-      }
-      lastFetchTime = new Date().toISOString();
+      scoreData = await API.fetchScore();
+      renderer.render(scoreData);
+      updateNoteCount();
     } catch (_) {}
-  }, 15000);
+  });
+
+  es.addEventListener('note-added', (e) => {
+    const note = JSON.parse(e.data);
+    // Our own POST already pushed this note locally before the broadcast loops back — skip duplicates.
+    if (scoreData.notes.some(n => n.id === note.id)) return;
+    scoreData.notes.push(note);
+    renderer.render(scoreData);
+    updateNoteCount();
+  });
+
+  es.addEventListener('note-updated', (e) => {
+    const note = JSON.parse(e.data);
+    const idx = scoreData.notes.findIndex(n => n.id === note.id);
+    if (idx === -1) scoreData.notes.push(note);
+    else scoreData.notes[idx] = note;
+    renderer.render(scoreData);
+  });
+
+  es.addEventListener('note-deleted', (e) => {
+    const { id } = JSON.parse(e.data);
+    const idx = scoreData.notes.findIndex(n => n.id === id);
+    if (idx === -1) return;
+    scoreData.notes.splice(idx, 1);
+    renderer.render(scoreData);
+    updateNoteCount();
+  });
+
+  es.addEventListener('measure-signature', (e) => {
+    const sig = JSON.parse(e.data);
+    if (!scoreData.measureSignatures) scoreData.measureSignatures = [];
+    const idx = scoreData.measureSignatures.findIndex(s => s.measure === sig.measure);
+    if (idx === -1) {
+      scoreData.measureSignatures.push(sig);
+      scoreData.measureSignatures.sort((a, b) => a.measure - b.measure);
+    } else {
+      scoreData.measureSignatures[idx] = sig;
+    }
+    renderer.render(scoreData);
+    updateTransportInfo(currentMeasure);
+  });
+
+  es.addEventListener('measure-signature-deleted', (e) => {
+    const { measure } = JSON.parse(e.data);
+    if (!scoreData.measureSignatures) return;
+    const idx = scoreData.measureSignatures.findIndex(s => s.measure === measure);
+    if (idx === -1) return;
+    scoreData.measureSignatures.splice(idx, 1);
+    renderer.render(scoreData);
+    updateTransportInfo(currentMeasure);
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Geolocation
-// ---------------------------------------------------------------------------
 async function initGeolocation() {
-  // Apply cached location to editor right away
   if (editor && (userLocation.city || userLocation.country)) {
     editor.location = userLocation;
   }
-  // Use IP-based geolocation — no permission needed, works on all devices
+  // IP-based lookup (ipapi.co) instead of browser geolocation — no permission prompt, works on all devices.
   try {
     const res = await fetch('https://ipapi.co/json/');
     if (!res.ok) return;
@@ -401,9 +385,6 @@ async function initGeolocation() {
   } catch (_) {}
 }
 
-// ---------------------------------------------------------------------------
-// Last location display
-// ---------------------------------------------------------------------------
 async function updateLastLocation() {
   try {
     const { latest } = await API.fetchContributions();
@@ -414,9 +395,6 @@ async function updateLastLocation() {
   } catch (_) {}
 }
 
-// ---------------------------------------------------------------------------
-// History popup
-// ---------------------------------------------------------------------------
 function bindHistory() {
   const historyBtn = document.getElementById('history-btn');
   const overlay = document.getElementById('history-overlay');
@@ -479,7 +457,4 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
 init();

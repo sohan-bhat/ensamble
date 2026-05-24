@@ -1,7 +1,3 @@
-// =========================================================================
-// Ensemble — Floating Note Editor
-// =========================================================================
-
 import {
   DUR_TO_VEX, DUR_TO_BEATS,
   getKeyAccidentals, pitchToVexKey, displayAccidental, restPosition,
@@ -11,23 +7,16 @@ import { API } from './api.js';
 
 const VF = Vex.Flow;
 
-// Diatonic note names in order (C=0 … B=6)
 const DIATONIC = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
-// Map clef → base note at VexFlow line position 0 (top line)
+// Pitch at VexFlow line position 0 (top staff line) per clef.
 const CLEF_BASE = {
   treble: { noteIdx: 3, octave: 5 }, // F5
   alto:   { noteIdx: 4, octave: 4 }, // G4
   bass:   { noteIdx: 5, octave: 3 }, // A3
 };
 
-// ---------------------------------------------------------------------------
-// Pitch ↔ staff position helpers
-// ---------------------------------------------------------------------------
-/**
- * Convert a VexFlow line position to a pitch string.
- * linePos 0 = top line, 4 = bottom line, supports above/below staff.
- */
+// linePos: 0 = top line, 4 = bottom line, half-steps allowed for spaces and above/below.
 function linePosToPitch(linePos, clef, keyAccidentals) {
   const base = CLEF_BASE[clef] || CLEF_BASE.treble;
   const steps = Math.round(linePos * 2); // each 0.5 line = 1 diatonic step down
@@ -36,14 +25,10 @@ function linePosToPitch(linePos, clef, keyAccidentals) {
   let noteIdx = absPos % 7;
   if (noteIdx < 0) { noteIdx += 7; octave--; }
   const letter = DIATONIC[noteIdx];
-  // Apply key signature accidental
   const keyAcc = keyAccidentals[letter] || '';
   return letter + keyAcc + octave;
 }
 
-/**
- * Convert a pitch string to a VexFlow line position (0 = top line).
- */
 function pitchToLinePos(pitch, clef) {
   const m = pitch.match(/^([A-G])/);
   if (!m) return 2;
@@ -56,9 +41,6 @@ function pitchToLinePos(pitch, clef) {
   return (baseAbs - pitchAbs) / 2;
 }
 
-// ---------------------------------------------------------------------------
-// NoteEditor class
-// ---------------------------------------------------------------------------
 export class NoteEditor {
   constructor({ onNoteAdded, onNoteDeleted, sessionId, scoreData }) {
     this.onNoteAdded = onNoteAdded;
@@ -66,28 +48,25 @@ export class NoteEditor {
     this.sessionId = sessionId;
     this.scoreData = scoreData;
 
-    // Current state
     this.isOpen = false;
     this.instrumentId = null;
     this.instrumentName = '';
     this.clef = 'treble';
     this.measure = 1;
     this.selectedDuration = 'quarter';
-    this.selectedAccidental = null; // null, 'sharp', 'flat', 'natural'
+    this.selectedAccidental = null; // null | 'sharp' | 'flat' | 'natural'
     this.restMode = false;
     this.vibrato = false;
     this.dynamic = 'mf';
-    this.placedNotes = []; // notes placed in this editing session (for undo)
+    this.placedNotes = []; // tracked per editing session so undo can only revert this session's adds
     this.location = { city: null, country: null };
 
-    // DOM
     this.overlay = document.getElementById('editor-overlay');
     this.editorEl = document.getElementById('editor');
     this.editorScoreEl = document.getElementById('editor-score');
     this.ghostCanvas = document.getElementById('ghost-canvas');
     this.ghostCtx = this.ghostCanvas.getContext('2d');
 
-    // Key signature info
     this.keyAccidentals = {};
 
     this._bindToolbar();
@@ -101,9 +80,6 @@ export class NoteEditor {
     if (this.isOpen) this._renderEditorStave();
   }
 
-  // -------------------------------------------------------------------------
-  // Open / close
-  // -------------------------------------------------------------------------
   open(instrumentId, instrumentName, clef, measure) {
     this.instrumentId = instrumentId;
     this.instrumentName = instrumentName;
@@ -144,9 +120,6 @@ export class NoteEditor {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Render the editor stave (1 measure, zoomed in)
-  // -------------------------------------------------------------------------
   _getEffectiveSig() {
     return getEffectiveSignature(this.measure, this.scoreData);
   }
@@ -175,10 +148,8 @@ export class NoteEditor {
     this._editorCtx = ctx;
     this._editorWidth = staveW;
 
-    // Update signature selectors to reflect current measure
     this._updateSigSelectors(eSig);
 
-    // Get notes for this instrument/measure
     const mNotes = this.scoreData.notes.filter(
       n => n.instrument_id === this.instrumentId && n.measure === this.measure
     );
@@ -207,10 +178,9 @@ export class NoteEditor {
       } catch (_) {}
     }
 
-    // Draw beat grid
     this._drawBeatGrid();
 
-    // Resize ghost canvas to match — scale for device pixel ratio (retina)
+    // Scale the ghost canvas for the device pixel ratio so notes stay crisp on retina.
     const dpr = window.devicePixelRatio || 1;
     const canvasW = this.editorScoreEl.clientWidth;
     const canvasH = height;
@@ -242,7 +212,6 @@ export class NoteEditor {
         time_signature: newTime,
         tempo: newTempo,
       });
-      // Update local data
       if (!this.scoreData.measureSignatures) this.scoreData.measureSignatures = [];
       const existing = this.scoreData.measureSignatures.find(s => s.measure === this.measure);
       if (existing) {
@@ -262,9 +231,6 @@ export class NoteEditor {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Beat grid lines in editor SVG
-  // -------------------------------------------------------------------------
   _drawBeatGrid() {
     if (!this._editorStave) return;
     const stave = this._editorStave;
@@ -283,7 +249,6 @@ export class NoteEditor {
     for (let b = 0; b <= beatsNum; b++) {
       const x = noteStartX + (b / beatsNum) * musicWidth;
 
-      // Beat number labels below the staff
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('x', x);
       text.setAttribute('y', botY + 16);
@@ -295,7 +260,7 @@ export class NoteEditor {
       text.textContent = b + 1;
       svgEl.appendChild(text);
 
-      // Dashed vertical lines (skip first and last — they overlap barlines)
+      // Skip first and last grid lines — they would overdraw the barlines.
       if (b > 0 && b < beatsNum) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', x);
@@ -311,9 +276,6 @@ export class NoteEditor {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Ghost note drawing
-  // -------------------------------------------------------------------------
   _clearGhost() {
     const dpr = window.devicePixelRatio || 1;
     this.ghostCtx.clearRect(0, 0, this.ghostCanvas.width / dpr, this.ghostCanvas.height / dpr);
@@ -325,7 +287,6 @@ export class NoteEditor {
     const c = color || '#6B8CA6';
     ctx.save();
 
-    // Pitch highlight band across the music area
     if (!this.restMode && this._editorStave) {
       const stave = this._editorStave;
       const nsX = stave.getNoteStartX();
@@ -338,7 +299,6 @@ export class NoteEditor {
     ctx.globalAlpha = 0.5;
 
     if (this.restMode) {
-      // Draw rest symbol placeholder
       ctx.fillStyle = c;
       ctx.font = '24px serif';
       ctx.textAlign = 'center';
@@ -346,7 +306,6 @@ export class NoteEditor {
       const restSymbols = { whole: '𝄻', half: '𝄼', quarter: '𝄽', eighth: '𝄾', sixteenth: '𝄿' };
       ctx.fillText(restSymbols[this.selectedDuration] || '𝄽', x, y);
     } else {
-      // Draw note head
       const filled = ['quarter', 'eighth', 'sixteenth'].includes(this.selectedDuration);
       ctx.beginPath();
       ctx.ellipse(x, y, 7, 5, -0.2, 0, Math.PI * 2);
@@ -359,10 +318,9 @@ export class NoteEditor {
         ctx.stroke();
       }
 
-      // Draw stem (unless whole note)
       if (this.selectedDuration !== 'whole') {
         const linePos = this._yToLinePos(y);
-        const stemUp = linePos > 2; // below middle line → stem up
+        const stemUp = linePos > 2; // notes below the middle line get stems pointing up
         ctx.beginPath();
         if (stemUp) {
           ctx.moveTo(x + 6, y);
@@ -376,10 +334,8 @@ export class NoteEditor {
         ctx.stroke();
       }
 
-      // Draw ledger lines if needed
       this._drawLedgerLines(ctx, x, y);
 
-      // Draw accidental symbol
       if (this.selectedAccidental) {
         const symbols = { sharp: '♯', flat: '♭', natural: '♮' };
         ctx.fillStyle = c;
@@ -389,7 +345,6 @@ export class NoteEditor {
         ctx.fillText(symbols[this.selectedAccidental] || '', x - 16, y);
       }
 
-      // Show pitch label
       ctx.fillStyle = c;
       ctx.font = '11px "DM Sans", sans-serif';
       ctx.textAlign = 'center';
@@ -410,14 +365,12 @@ export class NoteEditor {
     ctx.strokeStyle = '#6B8CA6';
     ctx.lineWidth = 1;
 
-    // Above staff
     for (let ly = topY - spacing; ly >= y - 2; ly -= spacing) {
       ctx.beginPath();
       ctx.moveTo(x - 12, ly);
       ctx.lineTo(x + 12, ly);
       ctx.stroke();
     }
-    // Below staff
     for (let ly = botY + spacing; ly <= y + 2; ly += spacing) {
       ctx.beginPath();
       ctx.moveTo(x - 12, ly);
@@ -426,9 +379,7 @@ export class NoteEditor {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Replace highlight — red tint on existing note being hovered for replace
-  // -------------------------------------------------------------------------
+  // Red overlay on an existing note when the cursor would replace it on click.
   _highlightExistingNote(beat) {
     if (!this._editorStave) return;
     const note = this.scoreData.notes.find(
@@ -446,13 +397,11 @@ export class NoteEditor {
     ctx.save();
     ctx.globalAlpha = 0.35;
 
-    // Red circle around the existing note
     ctx.beginPath();
     ctx.arc(noteX, noteY, 12, 0, Math.PI * 2);
     ctx.fillStyle = '#E53935';
     ctx.fill();
 
-    // "x" symbol
     ctx.globalAlpha = 0.7;
     ctx.fillStyle = 'white';
     ctx.font = 'bold 14px "DM Sans", sans-serif';
@@ -463,9 +412,6 @@ export class NoteEditor {
     ctx.restore();
   }
 
-  // -------------------------------------------------------------------------
-  // Mouse → pitch/beat conversion
-  // -------------------------------------------------------------------------
   _yToLinePos(y) {
     if (!this._editorStave) return 2;
     const stave = this._editorStave;
@@ -502,8 +448,6 @@ export class NoteEditor {
     const botY = stave.getYForLine(4);
     const halfSpacing = (botY - topY) / 8;
     return topY + linePos * halfSpacing * 2;
-    // Actually: each line position unit = halfSpacing
-    // linePos 0 → topY, linePos 4 → botY
   }
 
   _snapX(beat) {
@@ -519,11 +463,7 @@ export class NoteEditor {
     return noteStartX + fraction * musicWidth;
   }
 
-  // -------------------------------------------------------------------------
-  // Toolbar bindings
-  // -------------------------------------------------------------------------
   _bindToolbar() {
-    // Duration buttons
     document.querySelectorAll('.dur-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.dur-btn').forEach(b => b.classList.remove('active'));
@@ -532,7 +472,6 @@ export class NoteEditor {
       });
     });
 
-    // Accidental buttons
     document.querySelectorAll('.acc-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.classList.contains('active')) {
@@ -546,68 +485,52 @@ export class NoteEditor {
       });
     });
 
-    // Rest toggle
     document.getElementById('rest-toggle').addEventListener('click', () => {
       this.restMode = !this.restMode;
       document.getElementById('rest-toggle').classList.toggle('active', this.restMode);
     });
 
-    // Vibrato toggle
     document.getElementById('vibrato-toggle').addEventListener('click', () => {
       this.vibrato = !this.vibrato;
       document.getElementById('vibrato-toggle').classList.toggle('active', this.vibrato);
     });
 
-    // Dynamic
     document.getElementById('dynamic-select').addEventListener('change', (e) => {
       this.dynamic = e.target.value;
     });
 
-    // Key signature change
     document.getElementById('key-sig-select').addEventListener('change', (e) => {
       this._changeMeasureSignature({ key_signature: e.target.value });
     });
 
-    // Time signature change
     document.getElementById('time-sig-select').addEventListener('change', (e) => {
       this._changeMeasureSignature({ time_signature: e.target.value });
     });
 
-    // Tempo (BPM) change
     document.getElementById('tempo-input').addEventListener('change', (e) => {
       const val = parseInt(e.target.value);
       if (val >= 20 && val <= 300) {
         this._changeMeasureSignature({ tempo: val });
       } else {
-        // Reset to current effective tempo
         const eSig = this._getEffectiveSig();
         e.target.value = eSig.tempo;
       }
     });
 
-    // Undo
     document.getElementById('undo-btn').addEventListener('click', () => this.undo());
-
-    // Close
     document.getElementById('editor-close').addEventListener('click', () => this.close());
-
-    // Measure navigation
     document.getElementById('editor-prev-measure').addEventListener('click', () => this.prevMeasure());
     document.getElementById('editor-next-measure').addEventListener('click', () => this.nextMeasure());
 
-    // Click overlay background to close
     this.overlay.addEventListener('click', (e) => {
       if (e.target === this.overlay) this.close();
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Editor interaction (hover + click)
-  // -------------------------------------------------------------------------
   _bindEditorInteraction() {
     const wrapper = document.getElementById('editor-score-wrapper');
 
-    // Shared logic for pointer position (mouse or touch)
+    // Mouse and touch share the same pitch/beat conversion — only the event plumbing differs.
     const handlePointerMove = (clientX, clientY) => {
       if (!this.isOpen || !this._editorStave) return;
       const rect = this.ghostCanvas.getBoundingClientRect();
@@ -657,7 +580,6 @@ export class NoteEditor {
       }
     };
 
-    // Mouse events
     wrapper.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
     wrapper.addEventListener('mouseleave', () => {
       this._clearGhost();
@@ -668,9 +590,8 @@ export class NoteEditor {
       handlePointerPlace();
     });
 
-    // Touch events (mobile)
     wrapper.addEventListener('touchmove', (e) => {
-      e.preventDefault(); // prevent scrolling while editing
+      e.preventDefault(); // suppress page scroll while the user is positioning a note
       const t = e.touches[0];
       if (t) handlePointerMove(t.clientX, t.clientY);
     }, { passive: false });
@@ -683,7 +604,7 @@ export class NoteEditor {
     wrapper.addEventListener('touchend', (e) => {
       e.preventDefault();
       handlePointerPlace();
-      // Clear ghost after a short delay so user sees feedback
+      // Keep the ghost visible briefly after a tap so users get a confirmation flash.
       setTimeout(() => {
         this._clearGhost();
         this._currentGhost = null;
@@ -691,11 +612,7 @@ export class NoteEditor {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Place a note
-  // -------------------------------------------------------------------------
   async _placeNote(pitch, beat) {
-    // Check beat capacity — don't exceed time signature
     const eSig = this._getEffectiveSig();
     const [beatsNum] = eSig.time.split('/').map(Number);
     const existingNotes = this.scoreData.notes.filter(
@@ -703,14 +620,14 @@ export class NoteEditor {
     );
     const usedBeats = existingNotes.reduce((sum, n) => sum + (DUR_TO_BEATS[n.duration] || 0), 0);
     const newNoteBeats = DUR_TO_BEATS[this.selectedDuration] || 1;
-    // Block if total beats would overflow OR if note extends past end of measure
+    // Reject if the measure is full, or the note's tail would extend past the final beat.
     if (usedBeats + newNoteBeats > beatsNum || beat + newNoteBeats - 1 > beatsNum) {
       this.editorEl.style.borderColor = '#c44';
       setTimeout(() => { this.editorEl.style.borderColor = ''; }, 400);
       return;
     }
 
-    // Apply selected accidental override
+    // Toolbar accidental overrides whatever the key signature would imply for this pitch.
     let finalPitch = pitch;
     if (this.selectedAccidental && !this.restMode) {
       const letter = pitch[0];
@@ -740,51 +657,35 @@ export class NoteEditor {
     try {
       const saved = await API.addNote(noteData);
       this.placedNotes.push(saved);
-
-      // Add to local data
       this.scoreData.notes.push(saved);
-
-      // Re-render editor stave to show the new note
       this._renderEditorStave();
-
-      // Notify parent to re-render main score
       if (this.onNoteAdded) this.onNoteAdded(saved);
     } catch (err) {
       console.error('Failed to place note:', err);
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Undo last placed note
-  // -------------------------------------------------------------------------
   async undo() {
     if (this.placedNotes.length === 0) return;
     const last = this.placedNotes.pop();
 
     try {
       await API.deleteNote(last.id, this.sessionId);
-
-      // Remove from local data
       const idx = this.scoreData.notes.findIndex(n => n.id === last.id);
       if (idx !== -1) this.scoreData.notes.splice(idx, 1);
-
       this._renderEditorStave();
       if (this.onNoteDeleted) this.onNoteDeleted(last);
     } catch (err) {
       console.error('Failed to undo note:', err);
-      this.placedNotes.push(last); // re-add on failure
+      this.placedNotes.push(last);
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Delete an existing note (click-to-replace)
-  // -------------------------------------------------------------------------
   async _deleteExistingNote(note) {
     try {
       await API.deleteNote(note.id, this.sessionId);
     } catch (_) {
-      // If session mismatch, try re-adding as our own note at the same position
-      // For now, just remove locally for UX
+      // Server may reject the delete (different session owns the note); strip locally anyway so the UI doesn't lie about the click.
     }
     const idx = this.scoreData.notes.findIndex(n => n.id === note.id);
     if (idx !== -1) this.scoreData.notes.splice(idx, 1);
@@ -792,9 +693,6 @@ export class NoteEditor {
     if (this.onNoteDeleted) this.onNoteDeleted(note);
   }
 
-  // -------------------------------------------------------------------------
-  // Duration selection by number key
-  // -------------------------------------------------------------------------
   selectDuration(n) {
     const durations = ['whole', 'half', 'quarter', 'eighth', 'sixteenth'];
     if (n >= 1 && n <= 5) {

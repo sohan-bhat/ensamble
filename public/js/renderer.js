@@ -1,25 +1,20 @@
-// =========================================================================
-// Ensemble — VexFlow Score Renderer
-// =========================================================================
-
 const VF = Vex.Flow;
 
-// Duration name → VexFlow code
+// Duration name → VexFlow code.
 const DUR_TO_VEX = {
   whole: 'w', half: 'h', quarter: 'q', eighth: '8', sixteenth: '16',
 };
 
-// Duration name → number of quarter-note beats
+// Duration name → number of quarter-note beats.
 const DUR_TO_BEATS = {
   whole: 4, half: 2, quarter: 1, eighth: 0.5, sixteenth: 0.25,
 };
 
-// Ordered from longest to shortest for rest-filling
+// Longest-first so rest-filling can greedily place the largest rest that fits.
 const REST_DURATIONS = [
   [4, 'w'], [2, 'h'], [1, 'q'], [0.5, '8'], [0.25, '16'],
 ];
 
-// Key signature → which notes are sharped/flatted
 function getKeyAccidentals(key) {
   const sharps = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
   const flats  = ['B', 'E', 'A', 'D', 'G', 'C', 'F'];
@@ -34,39 +29,36 @@ function getKeyAccidentals(key) {
   return result;
 }
 
-// "D5" → "d/5" (VexFlow key format, without accidental — position only)
+// "D5" → "d/5" — VexFlow key format, position only (no accidental).
 function pitchToVexKey(pitch) {
   const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
   if (!m) return 'b/4';
   return `${m[1].toLowerCase()}/${m[3]}`;
 }
 
-// Get the accidental character from a pitch string
 function pitchAccidental(pitch) {
   const m = pitch.match(/^[A-G](#|b)?/);
   return m && m[1] ? m[1] : '';
 }
 
-// Get the letter from a pitch string
 function pitchLetter(pitch) {
   return pitch[0];
 }
 
-// Determine what accidental (if any) needs to be displayed,
-// accounting for the key signature.
+// Whether to draw an accidental glyph in front of this pitch, given the key sig.
 function displayAccidental(pitch, keyAccidentals) {
   const letter = pitchLetter(pitch);
   const acc = pitchAccidental(pitch);
   const keyAcc = keyAccidentals[letter] || '';
 
-  if (acc === keyAcc) return null;        // matches key sig — no display
+  if (acc === keyAcc) return null;
   if (acc === '#') return '#';
   if (acc === 'b') return 'b';
-  if (acc === '' && keyAcc) return 'n';   // need natural sign
+  if (acc === '' && keyAcc) return 'n';
   return null;
 }
 
-// Default rest position per clef (middle of staff)
+// Rest defaults to mid-staff per clef.
 function restPosition(clef) {
   if (clef === 'treble') return 'b/4';
   if (clef === 'alto')   return 'c/4';
@@ -74,10 +66,8 @@ function restPosition(clef) {
   return 'b/4';
 }
 
-// ---------------------------------------------------------------------------
-// Get effective key/time signature for a measure, walking back to find
-// the most recent override or falling back to the score default.
-// ---------------------------------------------------------------------------
+// Walk forward through measureSignatures applying any override at or before `measure`.
+// The latest override wins, so later sigs in the list shadow earlier ones.
 function getEffectiveSignature(measure, scoreData) {
   const sigs = scoreData.measureSignatures || [];
   let key = scoreData.score.key_signature;
@@ -93,16 +83,13 @@ function getEffectiveSignature(measure, scoreData) {
   return { key, time, tempo };
 }
 
-// ---------------------------------------------------------------------------
-// Fill a measure with VexFlow StaveNotes (notes + auto-rests)
-// ---------------------------------------------------------------------------
+// Build the VexFlow note sequence for one measure, auto-filling rests in gaps.
 function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
   const sorted = [...notes].sort((a, b) => a.beat - b.beat);
   const vexNotes = [];
-  let cursor = 1; // current beat position (1-based)
+  let cursor = 1; // beats are 1-based
 
   for (const note of sorted) {
-    // Fill gap before this note
     if (note.beat > cursor + 0.001) {
       pushRests(vexNotes, note.beat - cursor, clef);
       cursor = note.beat;
@@ -124,13 +111,11 @@ function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
       if (acc) {
         sn.addModifier(new VF.Accidental(acc), 0);
       }
-      // Add vibrato marking if enabled
       if (note.vibrato) {
         try {
           sn.addModifier(new VF.Vibrato());
-        } catch (_) { /* vibrato modifier not critical */ }
+        } catch (_) { /* VF.Vibrato is missing in some builds — silently skip the marking */ }
       }
-      // Store the note id for later reference
       sn._ensembleId = note.id;
       vexNotes.push(sn);
     }
@@ -138,7 +123,6 @@ function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
     cursor += beats;
   }
 
-  // Fill trailing rests
   const remaining = beatsPerMeasure - cursor + 1;
   if (remaining > 0.001) {
     pushRests(vexNotes, remaining, clef);
@@ -159,14 +143,11 @@ function pushRests(arr, beats, clef) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// ScoreRenderer — renders the entire orchestral score using VexFlow
-// ---------------------------------------------------------------------------
 export class ScoreRenderer {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.labelsContainer = document.getElementById('instrument-labels');
-    this.staveMap = []; // store stave positions for click detection
+    this.staveMap = []; // populated by render(); used by hitTest and the seek overlay
   }
 
   _getResponsiveSettings() {
@@ -179,11 +160,6 @@ export class ScoreRenderer {
     return { measuresPerSystem: 4, staveSpacing: 75, systemGap: 35, leftMargin: 40 };
   }
 
-  /**
-   * Render the full score.
-   * @param {Object} data - { score, instruments, notes }
-   * @returns {Array} staveMap for click detection
-   */
   render(data) {
     const { score, instruments, notes } = data;
     this.container.innerHTML = '';
@@ -199,14 +175,13 @@ export class ScoreRenderer {
     const totalMeasures = score.total_measures;
     const numSystems = Math.ceil(totalMeasures / measuresPerSystem);
 
-    // Group notes by instrument_id + measure
     const noteMap = {};
     for (const n of notes) {
       const k = `${n.instrument_id}__${n.measure}`;
       (noteMap[k] = noteMap[k] || []).push(n);
     }
 
-    // Calculate dimensions — no minimum width, fit the viewport
+    // Fit the viewport; clamp to 320px so very narrow phones still get a usable stave.
     const containerWidth = Math.max(this.container.clientWidth, 320);
     const systemHeight = instruments.length * staveSpacing;
     const totalHeight = numSystems * (systemHeight + systemGap) + 60;
@@ -220,13 +195,13 @@ export class ScoreRenderer {
       const startMeasure = sys * measuresPerSystem + 1;
       const systemY = sys * (systemHeight + systemGap) + 20;
 
-      // How many measures in this system (last system may be shorter)
+      // Last system may be shorter than measuresPerSystem.
       const measCount = Math.min(measuresPerSystem, totalMeasures - startMeasure + 1);
 
       const availableWidth = containerWidth - leftMargin - 10;
       const staveWidth = (availableWidth) / measCount;
 
-      let firstStavesOfSystem = []; // for bracket
+      let firstStavesOfSystem = []; // top + bottom stave of column 0, used to draw the system bracket
 
       for (let i = 0; i < instruments.length; i++) {
         const inst = instruments[i];
@@ -239,7 +214,6 @@ export class ScoreRenderer {
           const isFirstSystem = sys === 0;
           const x = leftMargin + m * staveWidth;
 
-          // Get effective signature for this measure
           const eSig = getEffectiveSignature(measureNum, data);
           const prevSig = measureNum > 1 ? getEffectiveSignature(measureNum - 1, data) : null;
           const keyChanged = prevSig && prevSig.key !== eSig.key;
@@ -256,7 +230,7 @@ export class ScoreRenderer {
             }
           }
 
-          // Show key/time signature changes mid-piece
+          // Re-draw key/time when they change mid-piece — otherwise the change is invisible.
           if (!isFirst) {
             if (keyChanged) stave.addKeySignature(eSig.key);
             if (timeChanged) stave.addTimeSignature(eSig.time);
@@ -265,13 +239,11 @@ export class ScoreRenderer {
           stave.setContext(ctx).draw();
           stavesInRow.push(stave);
 
-          // Draw tempo marking above top stave when tempo changes (or first measure)
           if (i === 0 && (measureNum === 1 || tempoChanged)) {
             this._tempoMarks = this._tempoMarks || [];
             this._tempoMarks.push({ x: x + 5, y: y - 5, tempo: eSig.tempo });
           }
 
-          // Store for click detection
           this.staveMap.push({
             instrumentId: inst.id,
             instrumentName: inst.name,
@@ -282,7 +254,6 @@ export class ScoreRenderer {
             stave,
           });
 
-          // Render notes with effective key accidentals and beats
           const mKeyAcc = getKeyAccidentals(eSig.key);
           const [mBeatsNum] = eSig.time.split('/').map(Number);
           const mNotes = noteMap[`${inst.id}__${measureNum}`] || [];
@@ -303,7 +274,6 @@ export class ScoreRenderer {
 
             voice.draw(ctx, stave);
 
-            // Auto-beam eighth and sixteenth notes
             try {
               const beamable = vexNotes.filter(
                 n => !n.isRest() &&
@@ -313,10 +283,9 @@ export class ScoreRenderer {
                 const beams = VF.Beam.generateBeams(beamable);
                 beams.forEach(b => b.setContext(ctx).draw());
               }
-            } catch (_) { /* beam errors are non-critical */ }
+            } catch (_) { /* beam generation can fail on edge-case voices — non-critical, skip */ }
           }
 
-          // Track first stave in each row for bracket
           if (m === 0) {
             if (i === 0) firstStavesOfSystem[0] = stave;
             if (i === instruments.length - 1) firstStavesOfSystem[1] = stave;
@@ -324,7 +293,6 @@ export class ScoreRenderer {
         }
       }
 
-      // Draw bracket and left barline
       if (firstStavesOfSystem[0] && firstStavesOfSystem[1]) {
         const bracket = new VF.StaveConnector(firstStavesOfSystem[0], firstStavesOfSystem[1]);
         bracket.setType(VF.StaveConnector.type.BRACKET);
@@ -336,13 +304,8 @@ export class ScoreRenderer {
       }
     }
 
-    // Add hover highlight rects for each measure column
     this._addMeasureHoverRects(ctx, instruments, totalMeasures);
-
-    // Draw tempo markings above staves
     this._drawTempoMarks();
-
-    // Render instrument labels for the first system
     this._renderLabels(instruments);
 
     return this.staveMap;
@@ -372,7 +335,6 @@ export class ScoreRenderer {
     const svgEl = this.container.querySelector('svg');
     if (!svgEl) return;
 
-    // One hover rect per individual stave (instrument × measure)
     for (const s of this.staveMap) {
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('x', s.x);
@@ -391,22 +353,18 @@ export class ScoreRenderer {
     this.labelsContainer.innerHTML = '';
 
     for (const inst of instruments) {
-      // Find the first stave for this instrument (first system, first measure)
       const entry = this.staveMap.find(s => s.instrumentId === inst.id);
       if (!entry) continue;
 
       const label = document.createElement('div');
       label.className = 'instrument-label';
-      // Center vertically on the stave (staveSpacing covers full row, staff lines ~40px inside)
+      // +20 centers the label on the stave lines (the row is ~75px but the actual staff sits ~20px down).
       label.style.top = `${entry.y + 20}px`;
       label.textContent = inst.abbreviation;
       this.labelsContainer.appendChild(label);
     }
   }
 
-  /**
-   * Given a click at (pageX, pageY), find which stave was clicked.
-   */
   hitTest(clientX, clientY) {
     const rect = this.container.getBoundingClientRect();
     const x = clientX - rect.left + this.container.scrollLeft;
@@ -420,10 +378,7 @@ export class ScoreRenderer {
     return null;
   }
 
-  /**
-   * Get the bounding geometry for a measure across all instruments.
-   * Used by the playhead to know where to draw.
-   */
+  // Used by the playhead to know the column geometry for one measure across all instruments.
   getSystemBoundsForMeasure(measureNum) {
     const staves = this.staveMap.filter(s => s.measure === measureNum);
     if (staves.length === 0) return null;
@@ -439,9 +394,6 @@ export class ScoreRenderer {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Utility exports for editor & playback
-// ---------------------------------------------------------------------------
 export {
   DUR_TO_VEX, DUR_TO_BEATS, REST_DURATIONS,
   getKeyAccidentals, pitchToVexKey, pitchAccidental, pitchLetter,
