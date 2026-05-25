@@ -338,12 +338,18 @@ export class ScoreRenderer {
     const svgEl = this.container.querySelector('svg');
     if (!svgEl) return;
 
+    // s.y is the VF.Stave construction y, which sits ~20px above the actual
+    // staff lines (VexFlow reserves space above for ledger lines / text).
+    // Derive the visual rect from getYForLine so hover tracks the staff itself.
+    const PAD = 12;
     for (const s of this.staveMap) {
+      const top = s.stave.getYForLine(0) - PAD;
+      const bot = s.stave.getYForLine(4) + PAD;
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('x', s.x);
-      rect.setAttribute('y', s.y);
+      rect.setAttribute('y', top);
       rect.setAttribute('width', s.width);
-      rect.setAttribute('height', s.height);
+      rect.setAttribute('height', bot - top);
       rect.setAttribute('class', 'measure-hover-rect');
       rect.setAttribute('data-measure', s.measure);
       rect.setAttribute('data-instrument', s.instrumentId);

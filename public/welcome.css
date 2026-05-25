@@ -1,0 +1,261 @@
+/* Homepage. Shares design tokens via style.css.
+   Structure: a tall runway (~500vh) holds a sticky 100vh stage; all five
+   scenes are absolutely-positioned on top of each other and crossfade /
+   transform based on scroll progress driven by welcome.js. */
+
+.welcome-body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  /* Avoid overflow-x:hidden here — it breaks position: sticky on iOS Safari. */
+}
+
+/* ---- Skip link (top right, sticky) ---- */
+
+.skip-link {
+  position: fixed;
+  top: 1.5rem;
+  right: 2rem;
+  z-index: 100;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-light);
+  background: rgba(245, 240, 235, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.skip-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(245, 240, 235, 0.95);
+}
+
+/* ---- Runway + sticky stage ---- */
+
+.runway {
+  position: relative;
+  height: 500vh;
+}
+
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.hero-waves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---- Scenes ---- */
+
+.scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 2rem;
+  opacity: 0;
+  transform: translateY(40px) scale(0.96);
+  will-change: opacity, transform;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Hero scene */
+
+.hero-title {
+  width: min(86vw, 760px);
+  height: clamp(110px, 18vw, 200px);
+  display: block;
+}
+
+.hero-title circle {
+  fill: var(--ink);
+}
+
+.hero-tagline {
+  margin-top: 1.5rem;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  color: var(--ink-light);
+  letter-spacing: 0.01em;
+  opacity: 0;
+  animation: fade-in 1.2s ease 2.2s forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Tutorial scenes: two-column inside the centred scene */
+
+.scene-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  align-items: center;
+  gap: 4rem;
+  max-width: 1100px;
+  width: 100%;
+  text-align: left;
+}
+
+.scene[data-scene="step2"] .scene-grid,
+.scene[data-scene="cta"]   .scene-grid {
+  /* leave default; visual-text order is set per scene via order */
+}
+
+.scene-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.step-num {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 1rem;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  margin-bottom: 0.75rem;
+}
+
+.step-title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(2rem, 4.2vw, 3.5rem);
+  line-height: 1.1;
+  color: var(--ink);
+  margin-bottom: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.step-body {
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--ink-light);
+  max-width: 36ch;
+}
+
+.step-body kbd {
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  color: var(--ink);
+  margin: 0 0.05rem;
+}
+
+.scene-visual {
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  aspect-ratio: 4 / 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 14px 36px -22px var(--shadow);
+}
+
+.scene-visual svg {
+  width: 100%;
+  height: auto;
+}
+
+/* Alternate visual side for rhythm */
+
+.scene[data-scene="step2"] .scene-text { order: 2; }
+.scene[data-scene="step2"] .scene-visual { order: 1; }
+
+/* CTA scene */
+
+.cta-title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  color: var(--ink);
+  max-width: 18ch;
+  line-height: 1.15;
+}
+
+.cta-sub {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 1.15rem;
+  color: var(--ink-light);
+  margin: 1rem 0 2rem;
+}
+
+.cta-btn {
+  display: inline-block;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--bg);
+  background: var(--ink);
+  padding: 1rem 2rem;
+  border-radius: 999px;
+  transition: background 0.25s ease, transform 0.2s ease;
+  pointer-events: auto; /* always clickable in case parent scene opacity blocks */
+}
+
+.cta-btn:hover {
+  background: var(--accent);
+  transform: translateY(-2px);
+}
+
+/* ---- Mobile ---- */
+
+@media (max-width: 720px) {
+  .runway { height: 350vh; }
+  .scene { padding: 3rem 1.25rem; }
+  .scene-grid {
+    grid-template-columns: 1fr;
+    gap: 1.75rem;
+    text-align: center;
+  }
+  .scene[data-scene="step2"] .scene-text { order: 1; }
+  .scene[data-scene="step2"] .scene-visual { order: 2; }
+  .scene-visual { aspect-ratio: 5 / 2; padding: 1rem; }
+  .step-body { max-width: none; }
+  .skip-link { top: 1rem; right: 1rem; }
+}
+
+/* ---- Reduced motion: skip dot animation and scene transforms ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .scene { transition: none !important; }
+  .hero-tagline { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .hero-waves { display: none; }
+}
