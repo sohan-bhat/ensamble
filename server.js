@@ -125,12 +125,40 @@ app.get('/api/score', (req, res) => {
   res.json({ score, instruments, notes, measureSignatures });
 });
 
+// Mirror of the frontend DUR_TO_BEATS in renderer.js — kept in sync by hand
+// since server is CJS and frontend is ESM.
+const DUR_TO_BEATS = { whole: 4, half: 2, quarter: 1, eighth: 0.5, sixteenth: 0.25 };
+
+function effectiveBeatsForMeasure(measure) {
+  const score = db.prepare('SELECT time_signature FROM score WHERE id = 1').get();
+  const sigs = db.prepare('SELECT measure, time_signature FROM measure_signatures WHERE measure <= ? ORDER BY measure').all(measure);
+  let time = score.time_signature;
+  for (const s of sigs) {
+    if (s.time_signature) time = s.time_signature;
+  }
+  return parseInt(time.split('/')[0], 10);
+}
+
 app.post('/api/notes', (req, res) => {
   const { instrument_id, pitch, measure, beat, duration, is_rest, accidental, dynamic, vibrato, session_id } = req.body;
 
   const score = db.prepare('SELECT total_measures FROM score WHERE id = 1').get();
   if (measure < 1 || measure > score.total_measures) {
     return res.status(400).json({ error: 'Measure out of range' });
+  }
+
+  const newBeats = DUR_TO_BEATS[duration];
+  if (newBeats === undefined) {
+    return res.status(400).json({ error: 'Invalid duration' });
+  }
+  const beatsPerMeasure = effectiveBeatsForMeasure(measure);
+  if (beat + newBeats - 1 > beatsPerMeasure) {
+    return res.status(400).json({ error: 'Note extends past end of measure' });
+  }
+  const existing = db.prepare('SELECT duration FROM notes WHERE instrument_id = ? AND measure = ?').all(instrument_id, measure);
+  const usedBeats = existing.reduce((sum, n) => sum + (DUR_TO_BEATS[n.duration] || 0), 0);
+  if (usedBeats + newBeats > beatsPerMeasure) {
+    return res.status(409).json({ error: 'Measure is full' });
   }
 
   const id = randomUUID();

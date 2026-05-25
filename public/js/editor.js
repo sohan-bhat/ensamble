@@ -2,6 +2,7 @@ import {
   DUR_TO_VEX, DUR_TO_BEATS,
   getKeyAccidentals, pitchToVexKey, displayAccidental, restPosition,
   buildMeasureNotes, getEffectiveSignature,
+  isLoneWholeRest, drawCenteredWholeRest,
 } from './renderer.js';
 import { API } from './api.js';
 
@@ -157,7 +158,9 @@ export class NoteEditor {
     const [beatsNum] = eSig.time.split('/').map(Number);
     const vexNotes = buildMeasureNotes(mNotes, this.clef, this.keyAccidentals, beatsNum);
 
-    if (vexNotes.length > 0) {
+    if (vexNotes.length > 0 && isLoneWholeRest(vexNotes)) {
+      drawCenteredWholeRest(stave, this.editorScoreEl.querySelector('svg'));
+    } else if (vexNotes.length > 0) {
       const voice = new VF.Voice({
         num_beats: beatsNum,
         beat_value: parseInt(eSig.time.split('/')[1]),
@@ -249,16 +252,19 @@ export class NoteEditor {
     for (let b = 0; b <= beatsNum; b++) {
       const x = noteStartX + (b / beatsNum) * musicWidth;
 
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', x);
-      text.setAttribute('y', botY + 16);
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('fill', '#9A9590');
-      text.setAttribute('font-size', '9');
-      text.setAttribute('font-family', 'DM Sans, sans-serif');
-      text.setAttribute('pointer-events', 'none');
-      text.textContent = b + 1;
-      svgEl.appendChild(text);
+      // Don't label the right barline (b === beatsNum) — that's not a beat, it's the end of the measure.
+      if (b < beatsNum) {
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', x);
+        text.setAttribute('y', botY + 16);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('fill', '#9A9590');
+        text.setAttribute('font-size', '9');
+        text.setAttribute('font-family', 'DM Sans, sans-serif');
+        text.setAttribute('pointer-events', 'none');
+        text.textContent = b + 1;
+        svgEl.appendChild(text);
+      }
 
       // Skip first and last grid lines — they would overdraw the barlines.
       if (b > 0 && b < beatsNum) {
@@ -612,7 +618,24 @@ export class NoteEditor {
     });
   }
 
+  _flashError() {
+    this.editorEl.style.borderColor = '#c44';
+    setTimeout(() => { this.editorEl.style.borderColor = ''; }, 400);
+  }
+
   async _placeNote(pitch, beat) {
+    // Drop overlapping clicks — the server check is authoritative, but the
+    // local check reads pre-await state and two rapid taps would both pass.
+    if (this._placing) return;
+    this._placing = true;
+    try {
+      await this._placeNoteInner(pitch, beat);
+    } finally {
+      this._placing = false;
+    }
+  }
+
+  async _placeNoteInner(pitch, beat) {
     const eSig = this._getEffectiveSig();
     const [beatsNum] = eSig.time.split('/').map(Number);
     const existingNotes = this.scoreData.notes.filter(
@@ -622,8 +645,7 @@ export class NoteEditor {
     const newNoteBeats = DUR_TO_BEATS[this.selectedDuration] || 1;
     // Reject if the measure is full, or the note's tail would extend past the final beat.
     if (usedBeats + newNoteBeats > beatsNum || beat + newNoteBeats - 1 > beatsNum) {
-      this.editorEl.style.borderColor = '#c44';
-      setTimeout(() => { this.editorEl.style.borderColor = ''; }, 400);
+      this._flashError();
       return;
     }
 
@@ -657,11 +679,16 @@ export class NoteEditor {
     try {
       const saved = await API.addNote(noteData);
       this.placedNotes.push(saved);
-      this.scoreData.notes.push(saved);
+      // SSE may have already pushed this note (the server broadcasts before our POST response lands) — dedupe by id.
+      if (!this.scoreData.notes.some(n => n.id === saved.id)) {
+        this.scoreData.notes.push(saved);
+      }
       this._renderEditorStave();
       if (this.onNoteAdded) this.onNoteAdded(saved);
     } catch (err) {
+      // Server-side capacity reject (or any other failure) — flash the editor red so the user sees why.
       console.error('Failed to place note:', err);
+      this._flashError();
     }
   }
 

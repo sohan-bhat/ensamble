@@ -259,7 +259,10 @@ export class ScoreRenderer {
           const mNotes = noteMap[`${inst.id}__${measureNum}`] || [];
           const vexNotes = buildMeasureNotes(mNotes, inst.clef, mKeyAcc, mBeatsNum);
 
-          if (vexNotes.length > 0) {
+          if (vexNotes.length > 0 && isLoneWholeRest(vexNotes)) {
+            // Bypass the formatter for a single whole rest — draw a centred glyph instead.
+            drawCenteredWholeRest(stave, this.container.querySelector('svg'));
+          } else if (vexNotes.length > 0) {
             const voice = new VF.Voice({
               num_beats: mBeatsNum,
               beat_value: parseInt(eSig.time.split('/')[1]),
@@ -394,9 +397,35 @@ export class ScoreRenderer {
   }
 }
 
+// Whether the voice is exactly one whole-rest (an empty / user-rest measure).
+// In that case VexFlow's formatter pins the rest to noteStartX with no balance
+// partner, so we skip the voice and draw a centred rest glyph ourselves.
+function isLoneWholeRest(vexNotes) {
+  return vexNotes.length === 1 && vexNotes[0].isRest() && vexNotes[0].getDuration() === 'w';
+}
+
+// Draws a whole-rest glyph as a plain SVG rect hanging from the 4th staff line
+// (one line below the top), centred between the stave's note start and end X.
+function drawCenteredWholeRest(stave, svgEl) {
+  if (!svgEl) return;
+  const restW = 13;
+  const restH = 5;
+  const cx = (stave.getNoteStartX() + stave.getNoteEndX()) / 2;
+  // getYForLine(1) is the 4th staff line from the bottom; a whole rest hangs *below* it.
+  const top = stave.getYForLine(1);
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', cx - restW / 2);
+  rect.setAttribute('y', top);
+  rect.setAttribute('width', restW);
+  rect.setAttribute('height', restH);
+  rect.setAttribute('fill', '#000');
+  rect.setAttribute('pointer-events', 'none');
+  svgEl.appendChild(rect);
+}
+
 export {
   DUR_TO_VEX, DUR_TO_BEATS, REST_DURATIONS,
   getKeyAccidentals, pitchToVexKey, pitchAccidental, pitchLetter,
   displayAccidental, restPosition, buildMeasureNotes, pushRests,
-  getEffectiveSignature,
+  getEffectiveSignature, isLoneWholeRest, drawCenteredWholeRest,
 };
