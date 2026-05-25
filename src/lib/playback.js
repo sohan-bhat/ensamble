@@ -1,16 +1,13 @@
 // Sample-based playback via Web Audio. Loads MusyngKite mp3s from the MIDI.js
 // Soundfonts project; falls back to a sine oscillator if a sample fails to load.
 
-import { DUR_TO_BEATS, getEffectiveSignature } from './renderer.js';
+import { DUR_TO_BEATS, getEffectiveSignature } from './vexflow-helpers.js';
 
 const SAMPLE_BASE = 'https://gleitz.github.io/midi-js-soundfonts/MusyngKite';
 
 const INST_TO_SOUNDFONT = {
-  violin1:    'violin',
-  violin2:    'violin',
-  viola:      'viola',
-  cello:      'cello',
-  contrabass: 'contrabass',
+  violin1: 'violin', violin2: 'violin', viola: 'viola',
+  cello: 'cello', contrabass: 'contrabass',
 };
 
 // MIDI.js soundfont filenames spell black keys as flats (Db4.mp3, not C#4.mp3).
@@ -41,17 +38,14 @@ function pitchToFreq(pitch) {
   return 440 * Math.pow(2, semitones / 12);
 }
 
-const DYNAMIC_GAIN = {
-  pp: 0.3, p: 0.5, mp: 0.7, mf: 1.0, f: 1.3, ff: 1.6,
+const DYNAMIC_GAIN = { pp: 0.3, p: 0.5, mp: 0.7, mf: 1.0, f: 1.3, ff: 1.6 };
+const INST_GAIN = {
+  violin1: 0.9, violin2: 0.85, viola: 0.9, cello: 1.0, contrabass: 1.1,
 };
 
 // Schedule audio slightly after the visual playhead so the head reaches each
 // note before it sounds (accounts for VexFlow formatter padding).
 const SCHEDULE_AHEAD = 0.12;
-
-const INST_GAIN = {
-  violin1: 0.9, violin2: 0.85, viola: 0.9, cello: 1.0, contrabass: 1.1,
-};
 
 class SampleCache {
   constructor() {
@@ -82,8 +76,7 @@ class SampleCache {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
-        const audio = await audioCtx.decodeAudioData(buf);
-        this._cache.set(cacheKey, audio);
+        this._cache.set(cacheKey, await audioCtx.decodeAudioData(buf));
       } catch (err) {
         console.warn(`Sample load failed (${cacheKey}):`, err.message);
       } finally {
@@ -96,8 +89,7 @@ class SampleCache {
 
   get(instrumentId, pitch) {
     const sfInst = INST_TO_SOUNDFONT[instrumentId] || 'violin';
-    const sampleKey = pitchToSampleKey(pitch);
-    return this._cache.get(`${sfInst}:${sampleKey}`) || null;
+    return this._cache.get(`${sfInst}:${pitchToSampleKey(pitch)}`) || null;
   }
 }
 
@@ -135,12 +127,8 @@ export class PlaybackEngine {
     if (!this.audioCtx) {
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-    if (this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
-    }
-    if (!this._reverbBuf) {
-      this._reverbBuf = createReverbImpulse(this.audioCtx);
-    }
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
+    if (!this._reverbBuf) this._reverbBuf = createReverbImpulse(this.audioCtx);
   }
 
   async play(scoreData, fromMeasure = 1) {
@@ -150,7 +138,6 @@ export class PlaybackEngine {
     this.playing = true;
     this.loading = true;
     this.startMeasure = fromMeasure;
-    this._scoreData = scoreData;
 
     const { score, notes } = scoreData;
 
@@ -159,27 +146,28 @@ export class PlaybackEngine {
     if (!this.playing) return;
     this.loading = false;
 
-    this._compressor = this.audioCtx.createDynamicsCompressor();
+    const ctx = this.audioCtx;
+    this._compressor = ctx.createDynamicsCompressor();
     this._compressor.threshold.value = -15;
     this._compressor.knee.value = 10;
     this._compressor.ratio.value = 3;
     this._compressor.attack.value = 0.005;
     this._compressor.release.value = 0.2;
-    this._compressor.connect(this.audioCtx.destination);
+    this._compressor.connect(ctx.destination);
 
-    this._reverb = this.audioCtx.createConvolver();
+    this._reverb = ctx.createConvolver();
     this._reverb.buffer = this._reverbBuf;
-    const reverbWet = this.audioCtx.createGain();
+    const reverbWet = ctx.createGain();
     reverbWet.gain.value = 0.25;
     this._reverb.connect(reverbWet);
     reverbWet.connect(this._compressor);
 
-    this._dryBus = this.audioCtx.createGain();
+    this._dryBus = ctx.createGain();
     this._dryBus.gain.value = 1.0;
     this._dryBus.connect(this._compressor);
     this._dryBus.connect(this._reverb);
 
-    this.startTime = this.audioCtx.currentTime;
+    this.startTime = ctx.currentTime;
 
     let lastNotesMeasure = fromMeasure;
     for (const n of notes) {
@@ -195,8 +183,7 @@ export class PlaybackEngine {
     for (let m = fromMeasure; m <= lastNotesMeasure; m++) {
       this._measureStartTimes[m] = cumTime;
       const mSig = getEffectiveSignature(m, scoreData);
-      const mTempo = mSig.tempo || score.tempo;
-      const mSecPerBeat = 60 / mTempo;
+      const mSecPerBeat = 60 / (mSig.tempo || score.tempo);
       this._measureSecPerBeat[m] = mSecPerBeat;
       const [mBeats] = mSig.time.split('/').map(Number);
       cumTime += mBeats * mSecPerBeat;
@@ -204,17 +191,14 @@ export class PlaybackEngine {
     this._totalDuration = cumTime;
 
     for (const note of notes) {
-      if (note.is_rest) continue;
-      if (note.measure < fromMeasure) continue;
+      if (note.is_rest || note.measure < fromMeasure) continue;
       if (this.soloInstrument && note.instrument_id !== this.soloInstrument) continue;
       if (this.mutedInstruments.has(note.instrument_id)) continue;
 
       const measureStart = this._measureStartTimes[note.measure] || 0;
       const secPerBeat = this._measureSecPerBeat[note.measure] || 60 / score.tempo;
       const noteStart = this.startTime + SCHEDULE_AHEAD + measureStart + (note.beat - 1) * secPerBeat;
-      const durBeats = DUR_TO_BEATS[note.duration] || 1;
-      const noteDur = durBeats * secPerBeat;
-
+      const noteDur = (DUR_TO_BEATS[note.duration] || 1) * secPerBeat;
       this._scheduleNote(note, noteStart, noteDur);
     }
 
@@ -246,9 +230,7 @@ export class PlaybackEngine {
 
   _scheduleNote(note, startTime, duration) {
     const ctx = this.audioCtx;
-    const dynGain = DYNAMIC_GAIN[note.dynamic] || 1.0;
-    const instGain = INST_GAIN[note.instrument_id] || 1.0;
-    const totalGain = dynGain * instGain;
+    const totalGain = (DYNAMIC_GAIN[note.dynamic] || 1.0) * (INST_GAIN[note.instrument_id] || 1.0);
     const useVibrato = note.vibrato === 1;
     const buffer = this._samples.get(note.instrument_id, note.pitch);
 
@@ -259,7 +241,6 @@ export class PlaybackEngine {
     if (buffer) {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-
       // Gentle low-pass tames the harsh top end of the raw samples.
       const warmth = ctx.createBiquadFilter();
       warmth.type = 'lowpass';
@@ -273,11 +254,9 @@ export class PlaybackEngine {
         const lfoGain = ctx.createGain();
         lfo.type = 'sine';
         lfo.frequency.value = 5.2;
-        // Ramp vibrato in over the first ~400ms so it sounds like a player adding it, not a constant oscillation.
+        // Ramp vibrato in over the first ~400ms so it sounds like a player adding it.
         lfoGain.gain.setValueAtTime(0, startTime);
-        lfoGain.gain.linearRampToValueAtTime(
-          12, startTime + Math.min(0.4, duration * 0.5)
-        );
+        lfoGain.gain.linearRampToValueAtTime(12, startTime + Math.min(0.4, duration * 0.5));
         lfo.connect(lfoGain);
         lfoGain.connect(source.detune);
         lfo.start(startTime);
@@ -293,9 +272,7 @@ export class PlaybackEngine {
       noteGain.gain.setValueAtTime(0.001, startTime);
       noteGain.gain.exponentialRampToValueAtTime(totalGain, sustainStart);
       noteGain.gain.setValueAtTime(totalGain, sustainStart);
-      noteGain.gain.exponentialRampToValueAtTime(
-        Math.max(totalGain * 0.85, 0.001), releaseStart
-      );
+      noteGain.gain.exponentialRampToValueAtTime(Math.max(totalGain * 0.85, 0.001), releaseStart);
       noteGain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
       source.start(startTime);
@@ -303,10 +280,9 @@ export class PlaybackEngine {
       this.scheduledNodes.push(source);
     } else {
       // Fallback when a sample failed to load — quiet sine so the score still plays.
-      const freq = pitchToFreq(note.pitch);
       const osc = ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.value = freq;
+      osc.frequency.value = pitchToFreq(note.pitch);
       osc.connect(noteGain);
 
       if (useVibrato) {
@@ -339,7 +315,6 @@ export class PlaybackEngine {
     const lastMeasure = this._lastPlayMeasure;
     const tick = () => {
       if (!this.playing) return;
-
       const elapsed = this.audioCtx.currentTime - this.startTime;
       if (elapsed >= this._totalDuration + SCHEDULE_AHEAD) {
         this.stop();
@@ -349,8 +324,7 @@ export class PlaybackEngine {
 
       let currentMeasure = this.startMeasure;
       for (let m = this.startMeasure; m <= lastMeasure; m++) {
-        const mStart = this._measureStartTimes[m] || 0;
-        if (elapsed >= mStart) currentMeasure = m;
+        if (elapsed >= (this._measureStartTimes[m] || 0)) currentMeasure = m;
         else break;
       }
 
@@ -361,16 +335,13 @@ export class PlaybackEngine {
       const mSecPerBeat = this._measureSecPerBeat[currentMeasure] || 60 / score.tempo;
       const secPerMeasure = mBeats * mSecPerBeat;
       const measureStartTime = this._measureStartTimes[currentMeasure] || 0;
-      const elapsedInMeasure = elapsed - measureStartTime;
-      const beatFraction = elapsedInMeasure / secPerMeasure;
+      const beatFraction = (elapsed - measureStartTime) / secPerMeasure;
 
       if (this.onPlaybackTick) {
         this.onPlaybackTick({ measure: currentMeasure, beatFraction, stopped: false });
       }
-
       this._animFrame = requestAnimationFrame(tick);
     };
-
     this._animFrame = requestAnimationFrame(tick);
   }
 }

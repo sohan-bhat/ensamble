@@ -8,7 +8,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve the Vite production build. During development the React app runs on
+// Vite's dev server (npm run dev → :5173) which proxies /api requests here.
+app.use(express.static(path.join(__dirname, 'dist')));
 
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -250,6 +252,15 @@ app.get('/api/contributions', (req, res) => {
     LIMIT 1
   `).get();
   res.json({ contributions, latest });
+});
+
+// SPA fallback: any non-API GET that didn't match a static file gets the
+// React index so client-side routing (e.g. /app) works on direct load.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexPath)) res.sendFile(indexPath);
+  else next();
 });
 
 app.listen(PORT, () => {
