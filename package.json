@@ -12,14 +12,12 @@
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
+    "@vitejs/plugin-react": "^4.3.4",
     "express": "^4.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
-    "vexflow": "^4.2.3"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
+    "vexflow": "^4.2.3",
     "vite": "^5.4.11"
   }
 }
