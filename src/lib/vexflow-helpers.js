@@ -1,12 +1,15 @@
-const VF = Vex.Flow;
+import {
+  Renderer, Stave, StaveNote, Voice, Formatter, Beam,
+  Accidental, Vibrato, StaveConnector,
+} from 'vexflow';
 
 // Duration name → VexFlow code.
-const DUR_TO_VEX = {
+export const DUR_TO_VEX = {
   whole: 'w', half: 'h', quarter: 'q', eighth: '8', sixteenth: '16',
 };
 
 // Duration name → number of quarter-note beats.
-const DUR_TO_BEATS = {
+export const DUR_TO_BEATS = {
   whole: 4, half: 2, quarter: 1, eighth: 0.5, sixteenth: 0.25,
 };
 
@@ -15,7 +18,7 @@ const REST_DURATIONS = [
   [4, 'w'], [2, 'h'], [1, 'q'], [0.5, '8'], [0.25, '16'],
 ];
 
-function getKeyAccidentals(key) {
+export function getKeyAccidentals(key) {
   const sharps = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
   const flats  = ['B', 'E', 'A', 'D', 'G', 'C', 'F'];
   const map = {
@@ -29,28 +32,19 @@ function getKeyAccidentals(key) {
   return result;
 }
 
-// "D5" → "d/5" — VexFlow key format, position only (no accidental).
-function pitchToVexKey(pitch) {
+// "D5" → "d/5" — VexFlow key format, position only.
+export function pitchToVexKey(pitch) {
   const m = pitch.match(/^([A-G])(#|b)?(\d)$/);
   if (!m) return 'b/4';
   return `${m[1].toLowerCase()}/${m[3]}`;
 }
 
-function pitchAccidental(pitch) {
-  const m = pitch.match(/^[A-G](#|b)?/);
-  return m && m[1] ? m[1] : '';
-}
-
-function pitchLetter(pitch) {
-  return pitch[0];
-}
-
 // Whether to draw an accidental glyph in front of this pitch, given the key sig.
-function displayAccidental(pitch, keyAccidentals) {
-  const letter = pitchLetter(pitch);
-  const acc = pitchAccidental(pitch);
+export function displayAccidental(pitch, keyAccidentals) {
+  const letter = pitch[0];
+  const accMatch = pitch.match(/^[A-G](#|b)?/);
+  const acc = accMatch && accMatch[1] ? accMatch[1] : '';
   const keyAcc = keyAccidentals[letter] || '';
-
   if (acc === keyAcc) return null;
   if (acc === '#') return '#';
   if (acc === 'b') return 'b';
@@ -60,15 +54,13 @@ function displayAccidental(pitch, keyAccidentals) {
 
 // Rest defaults to mid-staff per clef.
 function restPosition(clef) {
-  if (clef === 'treble') return 'b/4';
-  if (clef === 'alto')   return 'c/4';
-  if (clef === 'bass')   return 'd/3';
-  return 'b/4';
+  if (clef === 'alto') return 'c/4';
+  if (clef === 'bass') return 'd/3';
+  return 'b/4'; // treble default
 }
 
-// Walk forward through measureSignatures applying any override at or before `measure`.
-// The latest override wins, so later sigs in the list shadow earlier ones.
-function getEffectiveSignature(measure, scoreData) {
+// Walk forward through measureSignatures applying overrides at or before `measure`.
+export function getEffectiveSignature(measure, scoreData) {
   const sigs = scoreData.measureSignatures || [];
   let key = scoreData.score.key_signature;
   let time = scoreData.score.time_signature;
@@ -83,8 +75,20 @@ function getEffectiveSignature(measure, scoreData) {
   return { key, time, tempo };
 }
 
+function pushRests(arr, beats, clef) {
+  let rem = beats;
+  for (const [durBeats, durVex] of REST_DURATIONS) {
+    while (rem >= durBeats - 0.001) {
+      arr.push(new StaveNote({
+        clef, keys: [restPosition(clef)], duration: durVex + 'r',
+      }));
+      rem -= durBeats;
+    }
+  }
+}
+
 // Build the VexFlow note sequence for one measure, auto-filling rests in gaps.
-function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
+export function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
   const sorted = [...notes].sort((a, b) => a.beat - b.beat);
   const vexNotes = [];
   let cursor = 1; // beats are 1-based
@@ -99,65 +103,66 @@ function buildMeasureNotes(notes, clef, keyAccidentals, beatsPerMeasure) {
     const vexDur = DUR_TO_VEX[note.duration] || 'q';
 
     if (note.is_rest) {
-      vexNotes.push(new VF.StaveNote({
+      vexNotes.push(new StaveNote({
         clef, keys: [restPosition(clef)], duration: vexDur + 'r',
       }));
     } else {
-      const key = pitchToVexKey(note.pitch);
-      const sn = new VF.StaveNote({
-        clef, keys: [key], duration: vexDur, auto_stem: true,
+      const sn = new StaveNote({
+        clef, keys: [pitchToVexKey(note.pitch)], duration: vexDur, auto_stem: true,
       });
       const acc = displayAccidental(note.pitch, keyAccidentals);
-      if (acc) {
-        sn.addModifier(new VF.Accidental(acc), 0);
-      }
+      if (acc) sn.addModifier(new Accidental(acc), 0);
       if (note.vibrato) {
-        try {
-          sn.addModifier(new VF.Vibrato());
-        } catch (_) { /* VF.Vibrato is missing in some builds — silently skip the marking */ }
+        try { sn.addModifier(new Vibrato()); }
+        catch (_) { /* Vibrato modifier missing in some VF builds — non-critical. */ }
       }
       sn._ensembleId = note.id;
       vexNotes.push(sn);
     }
-
     cursor += beats;
   }
 
   const remaining = beatsPerMeasure - cursor + 1;
-  if (remaining > 0.001) {
-    pushRests(vexNotes, remaining, clef);
-  }
-
+  if (remaining > 0.001) pushRests(vexNotes, remaining, clef);
   return vexNotes;
 }
 
-function pushRests(arr, beats, clef) {
-  let rem = beats;
-  for (const [durBeats, durVex] of REST_DURATIONS) {
-    while (rem >= durBeats - 0.001) {
-      arr.push(new VF.StaveNote({
-        clef, keys: [restPosition(clef)], duration: durVex + 'r',
-      }));
-      rem -= durBeats;
-    }
-  }
+// VexFlow's formatter pins a single whole-rest to noteStartX with nothing to
+// balance against, so we bypass the voice and draw a centred rest glyph.
+function isLoneWholeRest(vexNotes) {
+  return vexNotes.length === 1 && vexNotes[0].isRest() && vexNotes[0].getDuration() === 'w';
 }
 
-export class ScoreRenderer {
-  constructor(containerId) {
-    this.container = document.getElementById(containerId);
-    this.labelsContainer = document.getElementById('instrument-labels');
-    this.staveMap = []; // populated by render(); used by hitTest and the seek overlay
-  }
+function drawCenteredWholeRest(stave, svgEl) {
+  if (!svgEl) return;
+  const restW = 13;
+  const restH = 5;
+  const cx = (stave.getNoteStartX() + stave.getNoteEndX()) / 2;
+  const top = stave.getYForLine(1); // 4th line from bottom; a whole rest hangs below it
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', cx - restW / 2);
+  rect.setAttribute('y', top);
+  rect.setAttribute('width', restW);
+  rect.setAttribute('height', restH);
+  rect.setAttribute('fill', '#000');
+  rect.setAttribute('pointer-events', 'none');
+  svgEl.appendChild(rect);
+}
 
-  _getResponsiveSettings() {
-    const w = window.innerWidth;
-    if (w <= 480) {
-      return { measuresPerSystem: 1, staveSpacing: 65, systemGap: 25, leftMargin: 40 };
-    } else if (w <= 768) {
-      return { measuresPerSystem: 2, staveSpacing: 70, systemGap: 30, leftMargin: 40 };
-    }
-    return { measuresPerSystem: 4, staveSpacing: 75, systemGap: 35, leftMargin: 40 };
+function responsiveSettings() {
+  const w = window.innerWidth;
+  if (w <= 480) return { measuresPerSystem: 1, staveSpacing: 65, systemGap: 25, leftMargin: 40 };
+  if (w <= 768) return { measuresPerSystem: 2, staveSpacing: 70, systemGap: 30, leftMargin: 40 };
+  return { measuresPerSystem: 4, staveSpacing: 75, systemGap: 35, leftMargin: 40 };
+}
+
+// ScoreRenderer takes DOM elements directly (not IDs) so it composes cleanly
+// with React refs. Otherwise unchanged from the vanilla version.
+export class ScoreRenderer {
+  constructor(scoreContainer, labelsContainer) {
+    this.container = scoreContainer;
+    this.labelsContainer = labelsContainer;
+    this.staveMap = []; // used by hitTest and the seek overlay
   }
 
   render(data) {
@@ -166,12 +171,7 @@ export class ScoreRenderer {
     this.staveMap = [];
     this._tempoMarks = [];
 
-    const rs = this._getResponsiveSettings();
-    const measuresPerSystem = rs.measuresPerSystem;
-    const staveSpacing = rs.staveSpacing;
-    const systemGap = rs.systemGap;
-    const leftMargin = rs.leftMargin;
-
+    const { measuresPerSystem, staveSpacing, systemGap, leftMargin } = responsiveSettings();
     const totalMeasures = score.total_measures;
     const numSystems = Math.ceil(totalMeasures / measuresPerSystem);
 
@@ -181,32 +181,28 @@ export class ScoreRenderer {
       (noteMap[k] = noteMap[k] || []).push(n);
     }
 
-    // Fit the viewport; clamp to 320px so very narrow phones still get a usable stave.
+    // Clamp to 320px so very narrow phones still get a usable stave.
     const containerWidth = Math.max(this.container.clientWidth, 320);
     const systemHeight = instruments.length * staveSpacing;
     const totalHeight = numSystems * (systemHeight + systemGap) + 60;
 
-    const renderer = new VF.Renderer(this.container, VF.Renderer.Backends.SVG);
+    const renderer = new Renderer(this.container, Renderer.Backends.SVG);
     renderer.resize(containerWidth, totalHeight);
     const ctx = renderer.getContext();
-    ctx.scale(1, 1);
 
     for (let sys = 0; sys < numSystems; sys++) {
       const startMeasure = sys * measuresPerSystem + 1;
       const systemY = sys * (systemHeight + systemGap) + 20;
-
-      // Last system may be shorter than measuresPerSystem.
       const measCount = Math.min(measuresPerSystem, totalMeasures - startMeasure + 1);
 
       const availableWidth = containerWidth - leftMargin - 10;
-      const staveWidth = (availableWidth) / measCount;
+      const staveWidth = availableWidth / measCount;
 
-      let firstStavesOfSystem = []; // top + bottom stave of column 0, used to draw the system bracket
+      const firstStavesOfSystem = []; // top + bottom of column 0 for the bracket
 
       for (let i = 0; i < instruments.length; i++) {
         const inst = instruments[i];
         const y = systemY + i * staveSpacing;
-        const stavesInRow = [];
 
         for (let m = 0; m < measCount; m++) {
           const measureNum = startMeasure + m;
@@ -220,27 +216,21 @@ export class ScoreRenderer {
           const timeChanged = prevSig && prevSig.time !== eSig.time;
           const tempoChanged = prevSig && prevSig.tempo !== eSig.tempo;
 
-          const stave = new VF.Stave(x, y, staveWidth);
+          const stave = new Stave(x, y, staveWidth);
 
           if (isFirst) {
             stave.addClef(inst.clef);
             stave.addKeySignature(eSig.key);
-            if (isFirstSystem) {
-              stave.addTimeSignature(eSig.time);
-            }
-          }
-
-          // Re-draw key/time when they change mid-piece — otherwise the change is invisible.
-          if (!isFirst) {
+            if (isFirstSystem) stave.addTimeSignature(eSig.time);
+          } else {
+            // Re-draw key/time when they change mid-piece — otherwise invisible.
             if (keyChanged) stave.addKeySignature(eSig.key);
             if (timeChanged) stave.addTimeSignature(eSig.time);
           }
 
           stave.setContext(ctx).draw();
-          stavesInRow.push(stave);
 
           if (i === 0 && (measureNum === 1 || tempoChanged)) {
-            this._tempoMarks = this._tempoMarks || [];
             this._tempoMarks.push({ x: x + 5, y: y - 5, tempo: eSig.tempo });
           }
 
@@ -249,9 +239,7 @@ export class ScoreRenderer {
             instrumentName: inst.name,
             clef: inst.clef,
             measure: measureNum,
-            x, y, width: staveWidth,
-            height: staveSpacing,
-            stave,
+            x, y, width: staveWidth, height: staveSpacing, stave,
           });
 
           const mKeyAcc = getKeyAccidentals(eSig.key);
@@ -259,31 +247,30 @@ export class ScoreRenderer {
           const mNotes = noteMap[`${inst.id}__${measureNum}`] || [];
           const vexNotes = buildMeasureNotes(mNotes, inst.clef, mKeyAcc, mBeatsNum);
 
-          if (vexNotes.length > 0) {
-            const voice = new VF.Voice({
+          if (vexNotes.length === 0) {
+            // nothing to draw
+          } else if (isLoneWholeRest(vexNotes)) {
+            drawCenteredWholeRest(stave, this.container.querySelector('svg'));
+          } else {
+            const voice = new Voice({
               num_beats: mBeatsNum,
               beat_value: parseInt(eSig.time.split('/')[1]),
             });
-            voice.setMode(VF.Voice.Mode.SOFT);
+            voice.setMode(Voice.Mode.SOFT);
             voice.addTickables(vexNotes);
 
             const fmtWidth = Math.max(stave.getNoteEndX() - stave.getNoteStartX() - 10, 50);
-            new VF.Formatter()
-              .joinVoices([voice])
-              .format([voice], fmtWidth);
-
+            new Formatter().joinVoices([voice]).format([voice], fmtWidth);
             voice.draw(ctx, stave);
 
             try {
               const beamable = vexNotes.filter(
-                n => !n.isRest() &&
-                  (n.getDuration() === '8' || n.getDuration() === '16')
+                n => !n.isRest() && (n.getDuration() === '8' || n.getDuration() === '16')
               );
               if (beamable.length >= 2) {
-                const beams = VF.Beam.generateBeams(beamable);
-                beams.forEach(b => b.setContext(ctx).draw());
+                Beam.generateBeams(beamable).forEach(b => b.setContext(ctx).draw());
               }
-            } catch (_) { /* beam generation can fail on edge-case voices — non-critical, skip */ }
+            } catch (_) { /* beam generation can fail on edge-case voices — skip */ }
           }
 
           if (m === 0) {
@@ -294,28 +281,22 @@ export class ScoreRenderer {
       }
 
       if (firstStavesOfSystem[0] && firstStavesOfSystem[1]) {
-        const bracket = new VF.StaveConnector(firstStavesOfSystem[0], firstStavesOfSystem[1]);
-        bracket.setType(VF.StaveConnector.type.BRACKET);
-        bracket.setContext(ctx).draw();
-
-        const line = new VF.StaveConnector(firstStavesOfSystem[0], firstStavesOfSystem[1]);
-        line.setType(VF.StaveConnector.type.SINGLE_LEFT);
-        line.setContext(ctx).draw();
+        const bracket = new StaveConnector(firstStavesOfSystem[0], firstStavesOfSystem[1]);
+        bracket.setType(StaveConnector.type.BRACKET).setContext(ctx).draw();
+        const line = new StaveConnector(firstStavesOfSystem[0], firstStavesOfSystem[1]);
+        line.setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
       }
     }
 
-    this._addMeasureHoverRects(ctx, instruments, totalMeasures);
+    this._addMeasureHoverRects();
     this._drawTempoMarks();
     this._renderLabels(instruments);
-
     return this.staveMap;
   }
 
   _drawTempoMarks() {
-    if (!this._tempoMarks || this._tempoMarks.length === 0) return;
     const svgEl = this.container.querySelector('svg');
-    if (!svgEl) return;
-
+    if (!svgEl || !this._tempoMarks.length) return;
     for (const mark of this._tempoMarks) {
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('x', mark.x);
@@ -325,22 +306,24 @@ export class ScoreRenderer {
       text.setAttribute('font-weight', '600');
       text.setAttribute('fill', '#2C2C2C');
       text.setAttribute('pointer-events', 'none');
-      text.textContent = `\u2669 = ${mark.tempo}`;
+      text.textContent = `♩ = ${mark.tempo}`;
       svgEl.appendChild(text);
     }
     this._tempoMarks = [];
   }
 
-  _addMeasureHoverRects(ctx, instruments, totalMeasures) {
+  _addMeasureHoverRects() {
     const svgEl = this.container.querySelector('svg');
     if (!svgEl) return;
-
+    const PAD = 12;
     for (const s of this.staveMap) {
+      const top = s.stave.getYForLine(0) - PAD;
+      const bot = s.stave.getYForLine(4) + PAD;
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('x', s.x);
-      rect.setAttribute('y', s.y);
+      rect.setAttribute('y', top);
       rect.setAttribute('width', s.width);
-      rect.setAttribute('height', s.height);
+      rect.setAttribute('height', bot - top);
       rect.setAttribute('class', 'measure-hover-rect');
       rect.setAttribute('data-measure', s.measure);
       rect.setAttribute('data-instrument', s.instrumentId);
@@ -351,14 +334,12 @@ export class ScoreRenderer {
   _renderLabels(instruments) {
     if (!this.labelsContainer) return;
     this.labelsContainer.innerHTML = '';
-
     for (const inst of instruments) {
       const entry = this.staveMap.find(s => s.instrumentId === inst.id);
       if (!entry) continue;
-
       const label = document.createElement('div');
       label.className = 'instrument-label';
-      // +20 centers the label on the stave lines (the row is ~75px but the actual staff sits ~20px down).
+      // +20 centers on the stave lines (the row is ~75px but the actual staff sits ~20px down).
       label.style.top = `${entry.y + 20}px`;
       label.textContent = inst.abbreviation;
       this.labelsContainer.appendChild(label);
@@ -369,11 +350,8 @@ export class ScoreRenderer {
     const rect = this.container.getBoundingClientRect();
     const x = clientX - rect.left + this.container.scrollLeft;
     const y = clientY - rect.top + this.container.scrollTop;
-
     for (const s of this.staveMap) {
-      if (x >= s.x && x <= s.x + s.width && y >= s.y && y <= s.y + s.height) {
-        return s;
-      }
+      if (x >= s.x && x <= s.x + s.width && y >= s.y && y <= s.y + s.height) return s;
     }
     return null;
   }
@@ -381,8 +359,7 @@ export class ScoreRenderer {
   // Used by the playhead to know the column geometry for one measure across all instruments.
   getSystemBoundsForMeasure(measureNum) {
     const staves = this.staveMap.filter(s => s.measure === measureNum);
-    if (staves.length === 0) return null;
-
+    if (!staves.length) return null;
     const first = staves[0];
     const last = staves[staves.length - 1];
     return {
@@ -393,10 +370,3 @@ export class ScoreRenderer {
     };
   }
 }
-
-export {
-  DUR_TO_VEX, DUR_TO_BEATS, REST_DURATIONS,
-  getKeyAccidentals, pitchToVexKey, pitchAccidental, pitchLetter,
-  displayAccidental, restPosition, buildMeasureNotes, pushRests,
-  getEffectiveSignature,
-};

@@ -10,32 +10,36 @@ Ensemble is a collaborative sheet music platform where multiple users contribute
 
 ```bash
 npm install          # Install dependencies
-npm start            # Start server at http://localhost:3000
-npm run dev          # Start with auto-reload (node --watch)
+npm run dev          # Vite dev server at http://localhost:5173 (proxies /api → :3000)
+npm run server       # Express API + static dist on http://localhost:3000 (with --watch)
+npm run build        # Build the React app into dist/
+npm start            # Run the Express server (production: serves dist/)
 ```
 
-There is no build step, test suite, or linter configured. Frontend files are served as static assets.
+Typical workflow: `npm run server` in one terminal, `npm run dev` in another. The Vite dev server proxies `/api` and `/api/events` to the Express server. For production / one-port serving: `npm run build && npm start`.
 
 ## Architecture
 
-**Backend**: `server.js` — Single-file Express server with SQLite (better-sqlite3).
+**Backend**: `server.js` — Single-file Express server with SQLite (better-sqlite3). Serves `dist/` as static files plus an SPA fallback so client-side routes (e.g. `/app`) work on direct load.
 
-**Frontend**: Vanilla ES6 modules in `public/js/`, no bundler. Loaded via `<script type="module">` in `public/index.html`.
+**Frontend**: Vite + React (no TypeScript). Entry: `index.html` → `src/main.jsx` → `src/App.jsx` (react-router-dom v6). Two routes: `/` (Home / intro) and `/app` (Score editor).
 
 ### Backend (`server.js`)
 
-- Express serves static files from `public/` and exposes a REST API
+- Express serves the Vite build from `dist/` and exposes a REST + SSE API
 - SQLite database stored at `data/ensemble.db` (WAL mode, foreign keys enabled)
 - Database auto-initializes tables and seeds default data on first run
 - Four tables: `score` (single-row global metadata), `instruments` (string quintet), `notes` (user-contributed notes, with optional `city`/`country`), `measure_signatures` (per-measure overrides for key/time/tempo)
 - In-place column migrations live in `server.js` as `ALTER TABLE ... ADD COLUMN` calls wrapped in try/catch — add new ones the same way so existing dev DBs upgrade automatically
+- Server-side note placement check (capacity + tail overflow) is authoritative; client checks are for fast UI feedback
 - Session-scoped deletions: notes can only be deleted by the session that created them (note edits via PUT are NOT session-scoped)
+- SPA fallback: any non-API GET that doesn't match a static file gets `dist/index.html` so direct loads on `/app` work
 
 ### API Endpoints
 
 - `GET /api/score` — Full score: `{ score, instruments, notes, measureSignatures }`
 - `GET /api/events` — SSE stream. Emits `note-added` / `note-updated` / `note-deleted` / `measure-signature` / `measure-signature-deleted` events on every mutation. Comment-line ping every 25s keeps idle connections alive through proxies.
-- `POST /api/notes` — Add a note (validated server-side; accepts optional `city`/`country`)
+- `POST /api/notes` — Add a note (validated server-side; accepts optional `city`/`country`). Rejects with 409 if the measure is full, 400 if the note extends past the final beat.
 - `PUT /api/notes/:id` — Edit a note (pitch/beat/duration/accidental/dynamic/vibrato)
 - `DELETE /api/notes/:id` — Delete a note (requires matching session_id in body)
 - `PUT /api/measure-signature/:measure` — Set key/time/tempo override for a measure
@@ -43,19 +47,52 @@ There is no build step, test suite, or linter configured. Frontend files are ser
 - `GET /api/notes/count` — Total note count
 - `GET /api/contributions` — Recent notes that carry location data (for the activity feed)
 
-### Frontend Modules (`public/js/`)
+### Frontend layout
 
-- **app.js** — Main controller. Bootstraps all modules, manages state (`scoreData`, `currentMeasure`), handles keyboard shortcuts, and runs an `EventSource` against `/api/events` for real-time collaborative sync (every reconnect refetches the full score for catch-up). Also fetches IP-based geolocation (ipapi.co) on load and caches it in `localStorage` under `ensemble_location`; the city/country are then attached to every new note the user creates.
-- **renderer.js** — Renders the full orchestral score as SVG using VexFlow (loaded from CDN). Handles multi-system layout (4 measures/system), key signature accidentals, auto-resting, and hit-testing for click interactions. Per-measure signature overrides from `measureSignatures` change the key/time/tempo mid-score.
-- **editor.js** — Floating overlay for adding/editing notes in a measure. Supports pitch selection via visual staff, duration (1-5 keys), accidentals, rests (R key), dynamics, undo (Ctrl+Z), and ghost note preview. Has parallel mouse + touch handlers so the editor works on mobile.
-- **playback.js** — Sample-based playback via Web Audio. Loads MusyngKite mp3s from the MIDI.js Soundfonts project on demand and caches decoded buffers in a `SampleCache`. Master chain is per-note Gain → dry bus → ConvolverReverb + Compressor → destination. Falls back to a sine oscillator if a sample fails to load. Soundfont filenames use flats (Db4, not C#4) — see `SHARP_TO_FLAT`.
-- **api.js** — Thin fetch wrapper around all backend endpoints
+```
+index.html                        Vite entry (loads /src/main.jsx)
+vite.config.mjs                   Plugin-react + dev proxy for /api
+src/
+  main.jsx                        React root + global CSS imports
+  App.jsx                         react-router-dom <Routes>
+  api.js                          fetch wrappers around the REST endpoints
+  styles/
+    style.css                     Shared design tokens + Score-page styles
+    welcome.css                   Home-page styles (scroll runway + scenes)
+  lib/
+    vexflow-helpers.js            Pure helpers + `ScoreRenderer` class (takes DOM
+                                  refs, not IDs — composes cleanly with React)
+    playback.js                   `PlaybackEngine` class — Web Audio sample
+                                  player with MusyngKite mp3s + sine fallback
+  hooks/
+    useScore.js                   Fetch + EventSource subscription; exposes
+                                  `scoreData`, functional setter, `noteCount`
+    useSession.js                 Stable session UUID (useRef)
+    useGeolocation.js             Cached ipapi.co lookup
+  pages/
+    Home.jsx                      Hero (dot constellation + cursor-reactive
+                                  waves canvas) + sticky-stage scroll runway
+                                  with 5 scenes driven by scroll progress
+    Score.jsx                     Orchestrator: header + transport +
+                                  ScoreRenderer + Editor + HistoryPopup
+  components/
+    Editor.jsx                    Floating overlay; VexFlow editor stave + beat
+                                  grid + ghost canvas (mouse + touch handlers)
+    HistoryPopup.jsx              Recent contributions modal
+```
 
-### Key Design Decisions
+### Key React patterns
+
+- `ScoreRenderer` and `PlaybackEngine` are vanilla classes stored in refs and constructed inside a `useEffect` gated on `scoreData` (so DOM refs are populated). Their callbacks (`onMeasureChange`, `onPlaybackTick`) update React state via stable setter refs.
+- `scoreData` lives in `useScore`'s state. All SSE handlers use functional updates (`setScoreData(prev => ...)`) with id-based dedupe, so the local POST and the SSE broadcast can race without producing duplicates.
+- `Editor.jsx` keeps an immutable `scoreDataRef` alongside the prop so its imperative pointer/keyboard handlers always read the latest notes without re-binding.
+- VexFlow rendering is imperative inside a `useEffect` keyed on `scoreData` — React doesn't try to diff thousands of SVG elements.
+
+### Key design decisions
 
 - No authentication — users are identified by a random session UUID (`crypto.randomUUID`)
 - Real-time sync uses Server-Sent Events (one-way server→client); state-changing actions still go over the REST API
-- VexFlow 4.2.3 is loaded from CDN, not bundled
+- VexFlow is the `vexflow` npm package (v4.2.3), imported with named exports — not the CDN script tag
 - Default score is D Major, 4/4, 32 measures, 5 string instruments — but any measure can override key/time/tempo via the `measure_signatures` table
 - Location tracking is IP-based (no browser permission prompt) and best-effort: notes created before geolocation resolves, or when the API fails, persist with `null` city/country
 - Database seeds a 4-measure harmonic progression (D→A→Bm→G) on empty init
