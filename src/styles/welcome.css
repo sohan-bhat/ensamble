@@ -38,6 +38,70 @@
   background: rgba(245, 240, 235, 0.95);
 }
 
+/* ---- Title pin (the morphing "Ensemble" dot logo, used on both pages) ---- */
+
+/* The pin's natural box is the mini size. On Home, JS-driven transforms
+   scale + translate it from the centre to the top-left as the user scrolls.
+   On Score it just sits in the top-left via a static translate. */
+.title-pin {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 160px;
+  height: 40px;
+  transform-origin: top left;
+  will-change: transform;
+  z-index: 50;
+  text-decoration: none;
+  display: block;
+  cursor: pointer;
+}
+
+/* SVG dots fill the pin. They're visible during morph; once pinned at the
+   corner, .pinned crossfades them out and the real <span> text in. */
+.title-pin > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.45s ease;
+}
+.title-pin > .title-pin-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 26px;
+  color: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+.title-pin.pinned > svg { opacity: 0; }
+.title-pin.pinned > .title-pin-text { opacity: 1; }
+
+/* Tagline element that morphs alongside the title pin. Its position is JS-
+   driven (translate from viewport-centre to top-left); font-size is JS-driven
+   too so it stays readable at the small mini state. */
+.title-pin-tagline {
+  position: fixed;
+  top: 0;
+  left: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  color: var(--ink-light);
+  white-space: nowrap;
+  will-change: transform, font-size;
+  z-index: 50;
+  pointer-events: none;
+  letter-spacing: 0.01em;
+}
+
 /* ---- Runway + sticky stage ---- */
 
 .runway {

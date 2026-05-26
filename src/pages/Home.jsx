@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import TitlePin from '../components/TitlePin.jsx';
 
 const REDUCED_MOTION = typeof window !== 'undefined' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -17,87 +18,9 @@ const SCENES = [
 
 export default function Home() {
   const runwayRef = useRef(null);
-  const titleSvgRef = useRef(null);
-  const titleTextRef = useRef(null);
   const wavesCanvasRef = useRef(null);
   const sceneRefs = useRef({});
   const setSceneRef = (id) => (el) => { sceneRefs.current[id] = el; };
-
-  // ---- Dot constellation that forms the word "Ensemble" ----
-  useEffect(() => {
-    const svg = titleSvgRef.current;
-    if (!svg) return;
-
-    const W = 800, H = 200;
-    const build = () => {
-      // Sample target positions from an offscreen render of the actual title.
-      const off = document.createElement('canvas');
-      off.width = W; off.height = H;
-      const octx = off.getContext('2d');
-      octx.fillStyle = '#000';
-      octx.textAlign = 'center';
-      octx.textBaseline = 'middle';
-      octx.font = 'italic 300 150px "Cormorant Garamond", Georgia, serif';
-      octx.fillText('Ensemble', W / 2, H / 2);
-
-      const img = octx.getImageData(0, 0, W, H);
-      const targets = [];
-      const STEP = 2; // dense enough that the dots themselves form the readable word
-      for (let y = 0; y < H; y += STEP) {
-        for (let x = 0; x < W; x += STEP) {
-          if (img.data[(y * W + x) * 4 + 3] > 128) targets.push([x, y]);
-        }
-      }
-      // Sparkle, not sweep.
-      for (let i = targets.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [targets[i], targets[j]] = [targets[j], targets[i]];
-      }
-
-      const dots = [];
-      const frag = document.createDocumentFragment();
-      for (const [tx, ty] of targets) {
-        const sx = REDUCED_MOTION ? tx : Math.random() * W;
-        const sy = REDUCED_MOTION ? ty : Math.random() * H;
-        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        c.setAttribute('r', '0.5');
-        c.setAttribute('cx', sx);
-        c.setAttribute('cy', sy);
-        c.style.opacity = REDUCED_MOTION ? '1' : '0';
-        frag.appendChild(c);
-        dots.push({ el: c, sx, sy, tx, ty });
-      }
-      svg.insertBefore(frag, titleTextRef.current);
-
-      if (REDUCED_MOTION) return;
-
-      const FADE_IN = 600;
-      const STAGGER = 400;
-      const MOVE    = 1500;
-      const TOTAL   = STAGGER + Math.max(FADE_IN, MOVE);
-      const easeOut = (t) => 1 - Math.pow(1 - t, 3);
-      const start = performance.now();
-
-      const tick = (now) => {
-        const t = now - start;
-        for (let i = 0; i < dots.length; i++) {
-          const d = dots[i];
-          const local = t - (i / dots.length) * STAGGER;
-          const alpha = local > 0 ? Math.min(1, local / FADE_IN) : 0;
-          const moveProgress = Math.max(0, Math.min(1, local / MOVE));
-          const e = easeOut(moveProgress);
-          d.el.setAttribute('cx', d.sx + (d.tx - d.sx) * e);
-          d.el.setAttribute('cy', d.sy + (d.ty - d.sy) * e);
-          d.el.style.opacity = String(alpha);
-        }
-        if (t < TOTAL + 100) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    };
-
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(build);
-    else build();
-  }, []);
 
   // ---- Cursor-reactive sine waves behind the hero ----
   useEffect(() => {
@@ -221,21 +144,16 @@ export default function Home() {
   return (
     <div className="welcome-body">
       <Link className="skip-link" to="/app">Skip intro &rarr;</Link>
+      <TitlePin morphOnScroll />
 
       <div className="runway" ref={runwayRef}>
         <div className="stage">
           <canvas id="hero-waves" className="hero-waves" ref={wavesCanvasRef}></canvas>
 
-          <section className="scene" ref={setSceneRef('hero')} data-scene="hero">
-            <svg id="hero-title" className="hero-title" viewBox="0 0 800 200" preserveAspectRatio="xMidYMid meet" ref={titleSvgRef}>
-              <text id="hero-title-text" x="400" y="100"
-                    textAnchor="middle" dominantBaseline="middle"
-                    fontFamily="'Cormorant Garamond', Georgia, serif"
-                    fontSize="150" fontStyle="italic" fontWeight="300"
-                    fill="#2C2C2C" style={{ opacity: 0 }} ref={titleTextRef}>Ensemble</text>
-            </svg>
-            <p className="hero-tagline">A shared score for the world.</p>
-          </section>
+          {/* Hero scene is intentionally empty — the title + tagline are
+              rendered by the fixed <TitlePin /> above, which morphs with scroll. */}
+          <section className="scene" ref={setSceneRef('hero')} data-scene="hero" />
+
 
           <section className="scene" ref={setSceneRef('step1')} data-scene="step1">
             <div className="scene-grid">

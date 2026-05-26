@@ -7,6 +7,7 @@ import { PlaybackEngine } from '../lib/playback.js';
 import { API } from '../api.js';
 import Editor from '../components/Editor.jsx';
 import HistoryPopup from '../components/HistoryPopup.jsx';
+import TitlePin from '../components/TitlePin.jsx';
 
 const KEY_NAMES = {
   C: 'C Major', G: 'G Major', D: 'D Major', A: 'A Major',
@@ -211,10 +212,7 @@ export default function Score() {
 
   return (
     <>
-      <header className="site-header">
-        <h1 className="logo">Ensemble</h1>
-        <p className="tagline">A shared score for the world</p>
-      </header>
+      <TitlePin />
 
       <div className="score-meta">
         <h2 className="piece-title">{scoreData.score.title}</h2>
